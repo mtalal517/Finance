@@ -156,22 +156,39 @@ to pay for.
 ### 1. Create the database
 
 1. Sign up at [mongodb.com/atlas](https://www.mongodb.com/atlas) and create an **M0**
-   cluster (free forever, 512 MB, no card).
-2. Pick a region **close to your Vercel region** — every page load makes a round trip,
-   and a mismatched region adds noticeable latency.
-3. Database Access → add a user with a strong password.
-4. Network Access → allow `0.0.0.0/0`. Vercel's functions do not have fixed addresses,
-   so this is required. Your database user's password is what protects the cluster.
-5. Connect → Drivers → copy the connection string.
+   cluster — free forever, 512 MB, no card.
+2. Choose a region close to your Vercel region. Every page load makes a round trip, so a
+   mismatch is felt on every click. `vercel.json` pins Vercel to **Mumbai (`bom1`)**;
+   pair it with Atlas **ap-south-1 (Mumbai)**. Change both together if you are elsewhere.
+3. **Database Access** → add a user with a strong password. Note it down.
+4. **Network Access** → allow `0.0.0.0/0`. Vercel's functions have no fixed IP
+   addresses, so an allowlist cannot work. Your database user's password is what
+   protects the cluster.
+5. **Connect → Drivers → Node.js** → copy the connection string. Replace `<db_password>`
+   with the database user's password. URL-encode it if it contains `@ : / #`, or pick a
+   password with only letters and digits.
 
-### 2. Deploy
+### 2. Push and import
 
-Push to GitHub, import the repo on Vercel, and set two environment variables:
+`.gitignore` already excludes `.env.local`, so no secret travels with the code.
+
+```bash
+git init && git add . && git commit -m "My finance app"
+git remote add origin <your-github-repo>
+git push -u origin main
+```
+
+Then on Vercel: **Add New → Project → import the repo**. Framework is detected as
+Next.js; leave the build settings alone.
+
+### 3. Set two environment variables
+
+Before the first deploy, add these under **Environment Variables** (all environments):
 
 | Variable | Value | Why |
 | --- | --- | --- |
 | `MONGODB_URI` | the Atlas connection string | Where the data lives. |
-| `FINANCE_PASSWORD` | a long passphrase | The app has no user accounts. Without this, anyone with the URL can read and edit your finances. |
+| `FINANCE_PASSWORD` | a long passphrase | The app has no user accounts. Without it, anyone with the URL can read and edit your finances. |
 
 `MONGODB_DB` is optional and defaults to `my-finance`.
 
@@ -179,20 +196,29 @@ Push to GitHub, import the repo on Vercel, and set two environment variables:
 returns 503 with instructions instead. That is deliberate: the alternative failure mode
 is publishing your finances, so it fails closed.
 
-### 3. First run
+### 4. Deploy and sign in
 
-The database starts empty and seeds itself with default categories and accounts on
-first load. If you have data from elsewhere, bring it across with **Settings → Import
+Open the URL, enter your password, and the database seeds itself with default categories
+and accounts. If you have data from elsewhere, bring it across with **Settings → Import
 data**.
 
 ### Notes on running it this way
 
-- Signing in lasts 30 days per device. Changing `FINANCE_PASSWORD` signs every device
-  out immediately.
-- Your financial records live on Atlas rather than on your own machine. Export
-  regularly if you want an offline copy you control.
-- The app works on any MongoDB, not just Atlas — a local `mongod` or a container is
-  fine for development.
+- Signing in lasts 30 days per device. Changing `FINANCE_PASSWORD` signs every device out
+  immediately.
+- Your records live on Atlas rather than on your own machine. Export occasionally if you
+  want an offline copy you control — Atlas M0 has no automated backups of its own.
+- Changing an environment variable does not affect the running deployment. **Redeploy**
+  after editing one.
+- The app works on any MongoDB, not just Atlas — a local `mongod` or a container is fine
+  for development.
+
+### Two settings that exist only for the deploy
+
+- **`package.json` → `config.mongodbMemoryServer.disablePostinstall`.** Vercel installs
+  devDependencies to build, and `mongodb-memory-server` would otherwise download a
+  ~100 MB mongod binary on every deploy for a test suite that never runs there.
+- **`package.json` → `engines.node: ">=20"`.** The store uses `structuredClone`.
 
 ## Notes
 

@@ -2,12 +2,20 @@
   "name": "my-finance",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsc -p tsconfig.test.json && node --conditions=react-server --test .test-build/tests/"
+  },
+  "config": {
+    "mongodbMemoryServer": {
+      "disablePostinstall": "true"
+    }
   },
   "dependencies": {
     "lucide-react": "^1.38.0",
