@@ -1,0 +1,259 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * The palette is neutral-first: one near-black for actions, one blue for
+ * navigation and focus, and three semantic colours reserved for what money is
+ * doing. Nothing else is coloured. Restraint is what separates a product from a
+ * dashboard template, and in a finance app a stray colour reads as a signal.
+ */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Surfaces ------------------------------------------------------------- */
+  --color-canvas: #fafafa;
+  --color-surface: #ffffff;
+  --color-sunken: #f4f4f5;
+  --color-line: #e8e8ec;
+  --color-line-strong: #d7d7de;
+
+  /* Text ----------------------------------------------------------------- */
+  --color-ink: #0b0b10;
+  --color-ink-soft: #52525b;
+  --color-muted: #8b8b95;
+
+  /* Actions -------------------------------------------------------------- */
+  --color-primary: #17171c;
+  --color-primary-hover: #2c2c34;
+
+  /* Navigation, links, focus --------------------------------------------- */
+  --color-accent: #2563eb;
+  --color-accent-ink: #1d4ed8;
+  --color-accent-soft: #eff4ff;
+
+  /* Semantic: reserved for the state of money, never decoration ----------- */
+  --color-positive: #15734a;
+  --color-positive-soft: #e9f4ee;
+  --color-warning: #a1590a;
+  --color-warning-soft: #fbf2e5;
+  --color-danger: #bf3129;
+  --color-danger-soft: #fbedec;
+
+  /* Type scale — tightened for data density ------------------------------ */
+  --text-xs: 0.6875rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.25rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+
+  /* Radii — restrained; nothing is a pill except a status chip ----------- */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.625rem;
+
+  /* Elevation — borders do the work; shadows only lift what floats ------- */
+  --shadow-xs: 0 1px 2px 0 rgb(11 11 16 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(11 11 16 / 0.06), 0 1px 2px -1px rgb(11 11 16 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(11 11 16 / 0.08), 0 2px 4px -2px rgb(11 11 16 / 0.04);
+  --shadow-lg: 0 16px 40px -8px rgb(11 11 16 / 0.16), 0 4px 12px -4px rgb(11 11 16 / 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Inter's alternate letterforms: a single-storey a and a straighter l. */
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.014em;
+  }
+
+  /* One focus treatment everywhere, visible on every surface. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+  }
+
+  /* Native number spinners are noise on an amount field. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+
+  /* The date picker indicator is invisible against our muted palette. */
+  input[type='date']::-webkit-calendar-picker-indicator {
+    opacity: 0.45;
+    cursor: pointer;
+  }
+  input[type='date']::-webkit-calendar-picker-indicator:hover {
+    opacity: 0.8;
+  }
+}
+
+@layer components {
+  /* Figures must align column to column, and never jitter as they change. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum', 'cv02', 'cv03', 'cv04';
+    letter-spacing: -0.005em;
+  }
+
+  .surface {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-xl);
+  }
+
+  /* Small caps label used above every figure and table column. */
+  .label {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .field {
+    width: 100%;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-line-strong);
+    background-color: var(--color-surface);
+    padding: 0.4375rem 0.625rem;
+    font-size: var(--text-base);
+    line-height: 1.25rem;
+    color: var(--color-ink);
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease,
+      background-color 120ms ease;
+  }
+  .field::placeholder {
+    color: var(--color-muted);
+  }
+  .field:hover:not(:disabled):not(:focus) {
+    border-color: #c2c2cb;
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+  .field[aria-invalid='true'] {
+    border-color: var(--color-danger);
+  }
+  .field[aria-invalid='true']:focus {
+    box-shadow: 0 0 0 3px var(--color-danger-soft);
+  }
+  .field:disabled {
+    background-color: var(--color-sunken);
+    color: var(--color-muted);
+    cursor: not-allowed;
+  }
+
+  /* Table rows share one rhythm so every table in the app scans alike. */
+  .table-head {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+}
+
+/* Motion ------------------------------------------------------------------ */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 120ms ease-out;
+}
+.animate-panel-in {
+  animation: panel-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-toast-in {
+  animation: slide-in-right 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-drawer-in {
+  animation: drawer-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

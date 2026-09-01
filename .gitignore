@@ -1,0 +1,17 @@
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Personal financial data — never commit
+/data/finance.json
+/data/backups/
+/data/*.corrupt-*.json
+/data/*.tmp
+
+.test-build/
+
+# Secrets — the password lives here locally
+.env
+.env.local
+.env*.local
