@@ -64,6 +64,8 @@ export interface Transaction {
   direction: TransactionDirection;
   /** Set when this row is a debt repayment, linking it back to the debt. */
   debtId: string | null;
+  /** Set when this row was written by paying a subscription. */
+  subscriptionId: string | null;
   createdAt: string;
 }
 
@@ -110,6 +112,53 @@ export interface Debt {
   createdAt: string;
 }
 
+/**
+ * Money placed into an account, tagged with what it is for.
+ *
+ * Neither income nor spending: it does not enter the month's arithmetic at all.
+ * It says where money sits and which category or savings pot it belongs to,
+ * which is the one thing a transaction cannot express — a transaction has an
+ * account it came *out* of and never one it went *into*.
+ */
+export interface Deposit {
+  id: string;
+  accountId: string;
+  amount: number;
+  /** The category or savings pot this money is set against. */
+  categoryId: string;
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  note: string;
+  createdAt: string;
+}
+
+/** How often a subscription is charged. */
+export type BillingCycle = 'monthly' | 'quarterly' | 'yearly';
+
+/**
+ * A recurring charge the app remembers, so it can tell you what you are
+ * committed to and what falls due next. Paying one writes an ordinary
+ * transaction — there is no separate subscription ledger to drift.
+ */
+export interface Subscription {
+  id: string;
+  name: string;
+  /** Charged once per `cycle`, not per month. */
+  amount: number;
+  cycle: BillingCycle;
+  /** ISO date, `YYYY-MM-DD`. Advances by one cycle each time it is paid. */
+  nextDueDate: string;
+  /** The budget category a payment is recorded against. */
+  categoryId: string | null;
+  /** The account a payment comes out of. */
+  accountId: string | null;
+  icon: string;
+  /** Paused subscriptions stay listed but cost nothing. */
+  active: boolean;
+  notes: string;
+  createdAt: string;
+}
+
 export type DateFormat = 'dd MMM yyyy' | 'dd/MM/yyyy' | 'yyyy-MM-dd' | 'MM/dd/yyyy';
 
 export interface Settings {
@@ -130,4 +179,6 @@ export interface FinanceData {
   budgets: Budget[];
   goals: Goal[];
   debts: Debt[];
+  subscriptions: Subscription[];
+  deposits: Deposit[];
 }

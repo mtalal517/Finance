@@ -66,6 +66,20 @@ export function addMonths(month: string, delta: number): string {
   return `${String(year).padStart(4, '0')}-${String(monthIndex + 1).padStart(2, '0')}`;
 }
 
+/**
+ * The same date `delta` months later, clamped to the end of a shorter month —
+ * a subscription billed on the 31st falls due on the 28th in February and goes
+ * back to the 31st in March.
+ */
+export function addMonthsToDate(date: string, delta: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const [year, month] = addMonths(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`, delta)
+    .split('-')
+    .map(Number);
+  const day = Math.min(d, daysInMonth(year, month));
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** `2026-09` -> `September 2026`. */
 export function monthLabel(month: string): string {
   if (!isValidMonth(month)) return month;

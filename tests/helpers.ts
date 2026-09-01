@@ -1,5 +1,5 @@
 import { createEmptyData } from '../lib/data/defaults';
-import type { FinanceData, Transaction } from '../lib/types';
+import type { Deposit, FinanceData, Subscription, Transaction } from '../lib/types';
 
 /** Builders that keep the tests about the behaviour rather than about setup. */
 
@@ -21,6 +21,7 @@ export function txn(partial: Partial<Transaction> & { amount: number; date: stri
     notes: partial.notes ?? '',
     direction: partial.direction ?? 'out',
     debtId: partial.debtId ?? null,
+    subscriptionId: partial.subscriptionId ?? null,
     createdAt: partial.createdAt ?? `2026-09-01T00:00:0${counter % 10}.000Z`,
   };
 }
@@ -39,5 +40,35 @@ export function income(
     amount,
     accountId: extra.accountId ?? null,
     createdAt: '2026-09-01T00:00:00.000Z',
+  };
+}
+
+export function subscription(partial: Partial<Subscription> = {}): Subscription {
+  counter += 1;
+  return {
+    id: partial.id ?? `sub_${counter}`,
+    name: partial.name ?? 'Netflix',
+    amount: partial.amount ?? 1_200,
+    cycle: partial.cycle ?? 'monthly',
+    nextDueDate: partial.nextDueDate ?? '2026-09-15',
+    categoryId: partial.categoryId ?? 'subscriptions',
+    accountId: partial.accountId ?? null,
+    icon: partial.icon ?? 'repeat',
+    active: partial.active ?? true,
+    notes: partial.notes ?? '',
+    createdAt: partial.createdAt ?? '2026-09-01T00:00:00.000Z',
+  };
+}
+
+export function deposit(partial: Partial<Deposit> & { amount: number }): Deposit {
+  counter += 1;
+  return {
+    id: partial.id ?? `dep_${counter}`,
+    accountId: partial.accountId ?? 'bank',
+    amount: partial.amount,
+    categoryId: partial.categoryId ?? 'savings',
+    date: partial.date ?? '2026-09-01',
+    note: partial.note ?? '',
+    createdAt: partial.createdAt ?? '2026-09-01T00:00:00.000Z',
   };
 }

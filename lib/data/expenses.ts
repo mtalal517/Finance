@@ -19,6 +19,7 @@ export async function createTransaction(body: unknown): Promise<Transaction> {
     const transaction: Transaction = {
       id: createId('exp', data.expenses.map((t) => t.id)),
       ...validated.value,
+      subscriptionId: null,
       createdAt: new Date().toISOString(),
     };
     data.expenses.push(transaction);

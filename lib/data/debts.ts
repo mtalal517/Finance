@@ -113,6 +113,7 @@ export async function recordDebtPayment(debtId: string, body: unknown): Promise<
       description,
       accountId: validated.value.accountId,
       notes: '',
+      subscriptionId: null,
       direction: debt.direction === 'payable' ? 'out' : 'in',
       debtId: debt.id,
       createdAt: new Date().toISOString(),

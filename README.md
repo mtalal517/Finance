@@ -108,16 +108,51 @@ paid from, and shows up in analytics — with no separate debt ledger to fall ou
 Deleting a debt keeps its payments. That money really did leave your account, so
 removing it would inflate your balances.
 
+### Subscriptions
+
+A subscription is a standing instruction, not money: recording one moves nothing. It
+notes what you pay, how often (monthly, quarterly or yearly) and when it falls due next.
+
+**Mark paid** writes an ordinary transaction against the category and account you gave
+it, dated the day it fell due, and rolls the due date on by one cycle. Because it is an
+ordinary transaction, the charge counts against that budget, comes off the account,
+appears in the category drill-down and shows in analytics — with no separate
+subscription ledger to fall out of sync. Paying late still lands the charge in the month
+it belonged to.
+
+Costs are compared per month whatever the cycle, so a yearly plan at 12,000 sits beside
+a monthly one at 1,000 as the same number. Pausing keeps a subscription listed but drops
+it from the totals and blocks payment.
+
+Deleting a subscription keeps its past charges, for the same reason deleting a debt
+keeps its payments: that money really did leave.
+
 ### Accounts
 
 Balances are never typed in. Each is:
 
 ```
-opening balance + income received in + repayments received − everything paid out
+opening balance + income in + repayments received + money added − everything paid out
 ```
 
 Leaving the account blank on an expense is fine — it still counts towards your spending
 and budgets, it just does not move a balance.
+
+**Add money** puts money into an account and says what it is for — a category or a
+savings pot. It is neither income nor spending: the month's arithmetic cannot see it at
+all, so Expenses, Savings and Remaining are untouched. It moves a balance and answers
+"what is this money for?", which is the one thing a transaction cannot express — a
+transaction has an account it came *out* of and never one it went *into*.
+
+Each account card then shows what is in it, broken down by category, so
+`JS Bank 20,000` can say *20,000 Emergency* rather than leaving you to remember.
+
+Because a deposit has no source, adding money raises your total balance with no income
+behind it. That is the deliberate trade for keeping it to one entry instead of a
+from-and-to transfer.
+
+Deleting an account keeps its transactions, unlinked — but takes its added money with
+it, since a deposit with no account records nothing.
 
 ## Project layout
 
@@ -125,8 +160,8 @@ and budgets, it just does not move a balance.
 middleware.ts           The password gate — runs before every page and handler
 app/
 ├── (app)/              Everything behind the password: Dashboard, Income,
-│                       Expenses, Budget, Analytics, Goals, Accounts,
-│                       Debts, Settings — plus the sidebar shell
+│                       Expenses, Subscriptions, Budget, Analytics, Goals,
+│                       Accounts, Debts, Settings — plus the sidebar shell
 ├── login/              The sign-in screen, outside the shell
 └── api/                Route handlers — the only things that write to disk
 
@@ -145,7 +180,7 @@ lib/
 ├── validation.ts       Server-side validation for every mutation
 └── types.ts            The shape of finance.json
 
-tests/                  Calculation, persistence and auth tests
+tests/                  Calculation, persistence, validation and auth tests
 ```
 
 Two rules hold the design together:

@@ -3,9 +3,11 @@ import { describe, it } from 'node:test';
 import {
   validateBudget,
   validateDebt,
+  validateDeposit,
   validateDebtPayment,
   validateGoal,
   validateIncome,
+  validateSubscription,
   validateTransaction,
 } from '../lib/validation';
 import { baseData } from './helpers';
@@ -149,5 +151,139 @@ describe('debt validation', () => {
     const result = validateDebtPayment(data, 'receivable', { amount: 500, date: '2026-09-14' });
     assert.ok(result.ok);
     assert.equal(result.value.categoryId, null);
+  });
+});
+
+describe('subscription validation', () => {
+  const data = baseData();
+
+  const valid = {
+    name: '  Netflix  ',
+    amount: '1,200',
+    cycle: 'monthly',
+    nextDueDate: '2026-09-15',
+    categoryId: 'subscriptions',
+    accountId: 'bank',
+    icon: 'repeat',
+    active: true,
+    notes: 'family plan',
+  };
+
+  it('accepts a well-formed subscription and trims the name', () => {
+    const result = validateSubscription(data, valid);
+
+    assert.ok(result.ok);
+    assert.equal(result.value.name, 'Netflix');
+    assert.equal(result.value.amount, 1_200);
+    assert.equal(result.value.cycle, 'monthly');
+    assert.equal(result.value.categoryId, 'subscriptions');
+    assert.equal(result.value.active, true);
+  });
+
+  it('requires a name', () => {
+    const result = validateSubscription(data, { ...valid, name: '   ' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.name);
+  });
+
+  it('rejects an amount of zero or less', () => {
+    const result = validateSubscription(data, { ...valid, amount: '0' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.amount);
+  });
+
+  it('rejects a billing cycle it does not know', () => {
+    const result = validateSubscription(data, { ...valid, cycle: 'weekly' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.cycle);
+  });
+
+  it('requires a category, because paying one writes an expense against it', () => {
+    const result = validateSubscription(data, { ...valid, categoryId: '' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.categoryId);
+  });
+
+  it('rejects a category that no longer exists', () => {
+    const result = validateSubscription(data, { ...valid, categoryId: 'gone' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.categoryId);
+  });
+
+  it('rejects a due date that is not a real date', () => {
+    const result = validateSubscription(data, { ...valid, nextDueDate: '2026-02-30' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.nextDueDate);
+  });
+
+  it('treats a missing active flag as running', () => {
+    const { active, ...withoutActive } = valid;
+    const result = validateSubscription(data, withoutActive);
+
+    assert.ok(result.ok);
+    assert.equal(result.value.active, true);
+  });
+});
+
+describe('deposit validation', () => {
+  const data = baseData();
+
+  const valid = {
+    accountId: 'bank',
+    amount: '20,000',
+    categoryId: 'savings',
+    date: '2026-09-01',
+    note: 'Emergency fund',
+  };
+
+  it('accepts a well-formed deposit', () => {
+    const result = validateDeposit(data, valid);
+
+    assert.ok(result.ok);
+    assert.equal(result.value.accountId, 'bank');
+    assert.equal(result.value.amount, 20_000);
+    assert.equal(result.value.categoryId, 'savings');
+    assert.equal(result.value.note, 'Emergency fund');
+  });
+
+  it('requires an account, because the money has to go somewhere', () => {
+    const result = validateDeposit(data, { ...valid, accountId: '' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.accountId);
+  });
+
+  it('rejects an account that no longer exists', () => {
+    const result = validateDeposit(data, { ...valid, accountId: 'gone' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.accountId);
+  });
+
+  it('requires a category, because the point is saying what the money is for', () => {
+    const result = validateDeposit(data, { ...valid, categoryId: '' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.categoryId);
+  });
+
+  it('rejects an amount of zero or less', () => {
+    const result = validateDeposit(data, { ...valid, amount: '0' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.amount);
+  });
+
+  it('rejects a date that is not real', () => {
+    const result = validateDeposit(data, { ...valid, date: '2026-02-31' });
+
+    assert.ok(!result.ok);
+    assert.ok(result.fieldErrors.date);
   });
 });

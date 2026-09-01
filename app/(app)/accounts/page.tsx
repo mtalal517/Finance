@@ -1,6 +1,11 @@
 import { ArrowDownLeft, ArrowUpRight, Coins } from 'lucide-react';
 import { readData } from '@/lib/data/store';
-import { getAccountBalances, getTotalBalance, getUnassignedTotals } from '@/lib/finance/calculations';
+import {
+  getAccountBalances,
+  getAccountContents,
+  getTotalBalance,
+  getUnassignedTotals,
+} from '@/lib/finance/calculations';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { StatItem, StatStrip } from '@/components/ui/StatCard';
 import { AccountsManager } from '@/components/accounts/AccountsManager';
@@ -12,10 +17,11 @@ export default async function AccountsPage() {
   const symbol = data.settings.currencySymbol;
 
   const balances = getAccountBalances(data);
+  const contents = getAccountContents(data);
   const total = getTotalBalance(data);
   const unassigned = getUnassignedTotals(data);
 
-  const received = balances.reduce((sum, b) => sum + b.incomeIn + b.receivedIn, 0);
+  const received = balances.reduce((sum, b) => sum + b.incomeIn + b.receivedIn + b.addedIn, 0);
   const paidOut = balances.reduce((sum, b) => sum + b.paidOut, 0);
 
   return (
@@ -36,7 +42,7 @@ export default async function AccountsPage() {
           amount={received}
           symbol={symbol}
           icon={ArrowDownLeft}
-          hint="Income and repayments"
+          hint="Income, repayments and money added"
         />
         <StatItem
           label="Money out"
@@ -47,7 +53,13 @@ export default async function AccountsPage() {
         />
       </StatStrip>
 
-      <AccountsManager balances={balances} symbol={symbol} unassigned={unassigned} />
+      <AccountsManager
+        balances={balances}
+        contents={contents}
+        deposits={data.deposits}
+        symbol={symbol}
+        unassigned={unassigned}
+      />
     </>
   );
 }

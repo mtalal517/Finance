@@ -1,11 +1,14 @@
 import type {
   Account,
+  BillingCycle,
   Category,
   Debt,
+  Deposit,
   FinanceData,
   Goal,
   IncomeEntry,
   IncomeType,
+  Subscription,
   Transaction,
 } from '@/lib/types';
 import { addMonths, daysUntil, monthOf, monthRange, todayIso, yearOf } from './dates';
@@ -452,6 +455,8 @@ export interface AccountBalance {
   paidOut: number;
   /** Repayments received on money owed to you, deposited here. */
   receivedIn: number;
+  /** Money put straight into this account and tagged with what it is for. */
+  addedIn: number;
   currentBalance: number;
   transactionCount: number;
 }
@@ -466,6 +471,7 @@ export function getAccountBalances(data: FinanceData): AccountBalance[] {
         incomeIn: 0,
         paidOut: 0,
         receivedIn: 0,
+        addedIn: 0,
         currentBalance: round2(account.openingBalance),
         transactionCount: 0,
       },
@@ -489,13 +495,79 @@ export function getAccountBalances(data: FinanceData): AccountBalance[] {
     balance.transactionCount += 1;
   }
 
+  // Money added is not a transaction, so it does not touch `transactionCount`
+  // — that count is about spending history, which this is not.
+  for (const entry of data.deposits) {
+    const balance = balances.get(entry.accountId);
+    if (!balance) continue;
+    balance.addedIn += entry.amount;
+  }
+
   return [...balances.values()].map((b) => ({
     ...b,
     incomeIn: round2(b.incomeIn),
     paidOut: round2(b.paidOut),
     receivedIn: round2(b.receivedIn),
-    currentBalance: round2(b.openingBalance + b.incomeIn + b.receivedIn - b.paidOut),
+    addedIn: round2(b.addedIn),
+    currentBalance: round2(
+      b.openingBalance + b.incomeIn + b.receivedIn + b.addedIn - b.paidOut,
+    ),
   }));
+}
+
+/**
+ * What each account is holding, by category.
+ *
+ * Only money you added explicitly appears here — income and spending say
+ * nothing about what money is *for*, so folding them in would be inventing an
+ * answer. An account can therefore hold a balance with nothing accounted for,
+ * which is the honest reading of "I have not said what this is."
+ */
+export interface AccountContentSlice {
+  category: Category;
+  amount: number;
+  count: number;
+}
+
+export interface AccountContents {
+  account: Account;
+  /** Largest first. */
+  slices: AccountContentSlice[];
+  total: number;
+}
+
+export function getAccountContents(data: FinanceData): AccountContents[] {
+  const categories = categoryIndex(data);
+  const byAccount = new Map<string, Map<string, { amount: number; count: number }>>();
+
+  for (const entry of data.deposits) {
+    const perCategory = byAccount.get(entry.accountId) ?? new Map();
+    const slice = perCategory.get(entry.categoryId) ?? { amount: 0, count: 0 };
+    slice.amount += entry.amount;
+    slice.count += 1;
+    perCategory.set(entry.categoryId, slice);
+    byAccount.set(entry.accountId, perCategory);
+  }
+
+  return data.accounts.map((account) => {
+    const perCategory = byAccount.get(account.id) ?? new Map();
+    const slices: AccountContentSlice[] = [...perCategory.entries()]
+      .map(([categoryId, slice]) => ({
+        category: categories.get(categoryId) ?? UNKNOWN_CATEGORY,
+        amount: round2(slice.amount),
+        count: slice.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return { account, slices, total: sum(slices.map((s) => s.amount)) };
+  });
+}
+
+/** Every deposit into one account, newest first. */
+export function depositsForAccount(data: FinanceData, accountId: string): Deposit[] {
+  return [...data.deposits]
+    .filter((d) => d.accountId === accountId)
+    .sort((a, b) => (a.date === b.date ? b.createdAt.localeCompare(a.createdAt) : b.date.localeCompare(a.date)));
 }
 
 export function getTotalBalance(data: FinanceData): number {
@@ -629,6 +701,94 @@ export function getDebtOverview(data: FinanceData): DebtOverview {
     totalOwedToYou,
     net: round2(totalOwedToYou - totalOwed),
     overdueCount: all.filter((d) => d.status === 'overdue').length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+/** A subscription is "due soon" once it falls inside this many days. */
+const DUE_SOON_DAYS = 7;
+
+/** Months per billing cycle, which is all it takes to normalise the cost. */
+const MONTHS_PER_CYCLE: Record<BillingCycle, number> = {
+  monthly: 1,
+  quarterly: 3,
+  yearly: 12,
+};
+
+export type SubscriptionState = 'overdue' | 'due-soon' | 'scheduled' | 'paused';
+
+export interface SubscriptionRow {
+  subscription: Subscription;
+  /** The charge spread over the cycle it covers, so cycles can be compared. */
+  monthlyCost: number;
+  yearlyCost: number;
+  daysUntilDue: number;
+  state: SubscriptionState;
+}
+
+export interface SubscriptionOverview {
+  /** What needs paying first, then by due date, with paused ones last. */
+  rows: SubscriptionRow[];
+  monthlyTotal: number;
+  yearlyTotal: number;
+  activeCount: number;
+  /** Active subscriptions already due or falling due within the week. */
+  dueSoonCount: number;
+}
+
+export function monthlyCostOf(subscription: Subscription): number {
+  return round2(subscription.amount / MONTHS_PER_CYCLE[subscription.cycle]);
+}
+
+const STATE_ORDER: Record<SubscriptionState, number> = {
+  overdue: 0,
+  'due-soon': 1,
+  scheduled: 2,
+  paused: 3,
+};
+
+export function getSubscriptionOverview(
+  data: FinanceData,
+  today: string = todayIso(),
+): SubscriptionOverview {
+  const rows: SubscriptionRow[] = data.subscriptions.map((subscription) => {
+    const days = daysUntil(subscription.nextDueDate, today);
+    const monthlyCost = monthlyCostOf(subscription);
+
+    let state: SubscriptionState;
+    if (!subscription.active) state = 'paused';
+    else if (days < 0) state = 'overdue';
+    else if (days <= DUE_SOON_DAYS) state = 'due-soon';
+    else state = 'scheduled';
+
+    return {
+      subscription,
+      monthlyCost,
+      yearlyCost: round2(monthlyCost * 12),
+      daysUntilDue: days,
+      state,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (STATE_ORDER[a.state] !== STATE_ORDER[b.state]) {
+      return STATE_ORDER[a.state] - STATE_ORDER[b.state];
+    }
+    return a.subscription.nextDueDate.localeCompare(b.subscription.nextDueDate);
+  });
+
+  const active = rows.filter((row) => row.state !== 'paused');
+  const monthlyTotal = sum(active.map((row) => row.monthlyCost));
+
+  return {
+    rows,
+    monthlyTotal,
+    yearlyTotal: round2(monthlyTotal * 12),
+    activeCount: active.length,
+    dueSoonCount: active.filter((row) => row.state !== 'scheduled').length,
   };
 }
 

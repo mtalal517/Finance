@@ -2,18 +2,21 @@ import { createEmptyData, DATA_VERSION, DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES, DE
 import { DEFAULT_ACCOUNT_ICON, DEFAULT_CATEGORY_ICON, resolveIconName } from '../icons/names';
 import type {
   Account,
+  BillingCycle,
   Budget,
   Category,
   CategoryType,
   DateFormat,
   Debt,
   DebtDirection,
+  Deposit,
   FinanceData,
   Goal,
   GoalContribution,
   IncomeEntry,
   IncomeType,
   Settings,
+  Subscription,
   Transaction,
   TransactionDirection,
 } from '@/lib/types';
@@ -160,6 +163,7 @@ function normalizeTransactions(
   categoryIds: Set<string>,
   accountIds: Set<string>,
   debtIds: Set<string>,
+  subscriptionIds: Set<string>,
 ): Transaction[] {
   const seen = new Set<string>();
   return array(value)
@@ -169,6 +173,7 @@ function normalizeTransactions(
       const categoryId = str(raw.categoryId) || null;
       const accountId = str(raw.accountId) || null;
       const debtId = str(raw.debtId) || null;
+      const subscriptionId = str(raw.subscriptionId) || null;
       return {
         id: uniqueId(seen, raw.id, 'exp'),
         amount: money(raw.amount),
@@ -180,6 +185,8 @@ function normalizeTransactions(
         notes: str(raw.notes).slice(0, 2000),
         direction,
         debtId: debtId && debtIds.has(debtId) ? debtId : null,
+        subscriptionId:
+          subscriptionId && subscriptionIds.has(subscriptionId) ? subscriptionId : null,
         createdAt: str(raw.createdAt, new Date().toISOString()),
       };
     })
@@ -263,6 +270,64 @@ function normalizeDebts(value: unknown): Debt[] {
     .filter((debt) => debt.amount > 0);
 }
 
+function normalizeSubscriptions(
+  value: unknown,
+  categoryIds: Set<string>,
+  accountIds: Set<string>,
+): Subscription[] {
+  const seen = new Set<string>();
+  const cycles: BillingCycle[] = ['monthly', 'quarterly', 'yearly'];
+  return array(value)
+    .filter(isObject)
+    .map((raw): Subscription => {
+      const categoryId = str(raw.categoryId) || null;
+      const accountId = str(raw.accountId) || null;
+      return {
+        id: uniqueId(seen, raw.id, 'sub'),
+        name: str(raw.name).trim().slice(0, 120) || 'Untitled',
+        amount: money(raw.amount),
+        cycle: cycles.includes(raw.cycle as BillingCycle) ? (raw.cycle as BillingCycle) : 'monthly',
+        nextDueDate: isoDate(raw.nextDueDate, today()),
+        categoryId: categoryId && categoryIds.has(categoryId) ? categoryId : null,
+        accountId: accountId && accountIds.has(accountId) ? accountId : null,
+        icon: resolveIconName(raw.icon, 'repeat'),
+        // Anything but an explicit `false` leaves it running.
+        active: raw.active !== false,
+        notes: str(raw.notes).slice(0, 2000),
+        createdAt: str(raw.createdAt, new Date().toISOString()),
+      };
+    })
+    .filter((s) => s.amount > 0);
+}
+
+/**
+ * A deposit needs both an account to sit in and a category to be for; without
+ * either it says nothing, so it is dropped rather than half-repaired.
+ */
+function normalizeDeposits(
+  value: unknown,
+  categoryIds: Set<string>,
+  accountIds: Set<string>,
+): Deposit[] {
+  const seen = new Set<string>();
+  return array(value)
+    .filter(isObject)
+    .map((raw): Deposit => {
+      const accountId = str(raw.accountId);
+      const categoryId = str(raw.categoryId);
+      return {
+        id: uniqueId(seen, raw.id, 'dep'),
+        accountId: accountIds.has(accountId) ? accountId : '',
+        amount: money(raw.amount),
+        categoryId: categoryIds.has(categoryId) ? categoryId : '',
+        date: isoDate(raw.date, today()),
+        note: str(raw.note).slice(0, 200),
+        createdAt: str(raw.createdAt, new Date().toISOString()),
+      };
+    })
+    .filter((d) => d.amount > 0 && d.accountId !== '' && d.categoryId !== '');
+}
+
 export function normalizeData(input: unknown): FinanceData {
   if (!isObject(input)) return createEmptyData();
 
@@ -273,6 +338,9 @@ export function normalizeData(input: unknown): FinanceData {
   const categoryIds = new Set(categories.map((c) => c.id));
   const accountIds = new Set(accounts.map((a) => a.id));
   const debtIds = new Set(debts.map((d) => d.id));
+
+  const subscriptions = normalizeSubscriptions(input.subscriptions, categoryIds, accountIds);
+  const subscriptionIds = new Set(subscriptions.map((s) => s.id));
 
   return {
     version: DATA_VERSION,
@@ -286,9 +354,12 @@ export function normalizeData(input: unknown): FinanceData {
       categoryIds,
       accountIds,
       debtIds,
+      subscriptionIds,
     ),
     budgets: normalizeBudgets(input.budgets, categoryIds),
     goals: normalizeGoals(input.goals),
     debts,
+    subscriptions,
+    deposits: normalizeDeposits(input.deposits, categoryIds, accountIds),
   };
 }

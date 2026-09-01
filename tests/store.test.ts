@@ -64,6 +64,7 @@ function newExpense(id: string, amount: number) {
     notes: '',
     direction: 'out' as const,
     debtId: null,
+    subscriptionId: null,
     createdAt: new Date().toISOString(),
   };
 }

@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   getAccountBalances,
+  getAccountContents,
   getBudgetVsActual,
   getCategoryDetail,
   getDebtOverview,
   getGoalProgress,
   getMonthSummary,
   getSpendingComparison,
+  getSubscriptionOverview,
   getYearSummary,
 } from '../lib/finance/calculations';
-import { baseData, income, txn } from './helpers';
+import { baseData, deposit, income, subscription, txn } from './helpers';
 
 const SEP = '2026-09';
 
@@ -257,6 +259,85 @@ describe('account balances', () => {
     assert.equal(balance.receivedIn, 3_000);
     assert.equal(balance.currentBalance, 151_000);
   });
+
+  it('counts money added straight into an account', () => {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 5_000 }];
+    data.deposits.push(deposit({ amount: 20_000, accountId: 'bank' }));
+
+    const [balance] = getAccountBalances(data);
+
+    assert.equal(balance.addedIn, 20_000);
+    assert.equal(balance.currentBalance, 25_000);
+  });
+
+  it('leaves other accounts alone when money is added to one', () => {
+    const data = baseData();
+    data.accounts = [
+      { id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 5_000 },
+      { id: 'cash', name: 'Cash', icon: 'banknote', openingBalance: 1_000 },
+    ];
+    data.deposits.push(deposit({ amount: 20_000, accountId: 'bank' }));
+
+    const balances = getAccountBalances(data);
+
+    assert.equal(balances.find((b) => b.account.id === 'bank')!.currentBalance, 25_000);
+    assert.equal(balances.find((b) => b.account.id === 'cash')!.currentBalance, 1_000);
+  });
+
+  it('ignores a deposit pointing at an account that is gone', () => {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 5_000 }];
+    data.deposits.push(deposit({ amount: 20_000, accountId: 'vanished' }));
+
+    assert.equal(getAccountBalances(data)[0].currentBalance, 5_000);
+  });
+
+  it('never lets money added leak into the month summary', () => {
+    const data = baseData();
+    data.income.push(income(110_000, '2026-09-01'));
+    data.deposits.push(deposit({ amount: 20_000, date: '2026-09-03', categoryId: 'savings' }));
+
+    const summary = getMonthSummary(data, SEP);
+
+    assert.equal(summary.income, 110_000, 'money added is not earning');
+    assert.equal(summary.expenses, 0, 'nor spending');
+    assert.equal(summary.savings, 0, 'nor a budget allocation');
+    assert.equal(summary.remaining, 110_000);
+  });
+});
+
+describe('what is stored in an account', () => {
+  it('groups the money added to it by category, largest first', () => {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 0 }];
+    data.deposits.push(
+      deposit({ amount: 5_000, accountId: 'bank', categoryId: 'savings' }),
+      deposit({ amount: 20_000, accountId: 'bank', categoryId: 'investment' }),
+      deposit({ amount: 3_000, accountId: 'bank', categoryId: 'savings' }),
+    );
+
+    const [stored] = getAccountContents(data);
+
+    assert.equal(stored.total, 28_000);
+    assert.deepEqual(
+      stored.slices.map((s) => [s.category.name, s.amount]),
+      [
+        ['Investment', 20_000],
+        ['Savings', 8_000],
+      ],
+    );
+  });
+
+  it('reports an account nothing has been added to as empty', () => {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 9_000 }];
+
+    const [stored] = getAccountContents(data);
+
+    assert.equal(stored.total, 0);
+    assert.deepEqual(stored.slices, []);
+  });
 });
 
 describe('goals', () => {
@@ -402,5 +483,100 @@ describe('comparisons and yearly totals', () => {
     assert.equal(year.expenses, 100_000);
     assert.equal(year.monthsWithActivity, 2);
     assert.equal(year.averageMonthlyExpense, 50_000);
+  });
+});
+
+describe('subscriptions', () => {
+  const TODAY = '2026-09-10';
+
+  it('normalises every billing cycle to a monthly cost', () => {
+    const data = baseData();
+    data.subscriptions.push(
+      subscription({ name: 'Netflix', amount: 1_200, cycle: 'monthly' }),
+      subscription({ name: 'Domain', amount: 3_000, cycle: 'quarterly' }),
+      subscription({ name: 'Office', amount: 12_000, cycle: 'yearly' }),
+    );
+
+    const cost = (name: string) =>
+      getSubscriptionOverview(data, TODAY).rows.find((r) => r.subscription.name === name)!.monthlyCost;
+
+    assert.equal(cost('Netflix'), 1_200);
+    assert.equal(cost('Domain'), 1_000);
+    assert.equal(cost('Office'), 1_000);
+  });
+
+  it('adds up only what is still active', () => {
+    const data = baseData();
+    data.subscriptions.push(
+      subscription({ amount: 1_200, cycle: 'monthly' }),
+      subscription({ amount: 500, cycle: 'monthly', active: false }),
+    );
+
+    const overview = getSubscriptionOverview(data, TODAY);
+
+    assert.equal(overview.monthlyTotal, 1_200, 'a paused subscription costs nothing');
+    assert.equal(overview.activeCount, 1);
+    assert.equal(overview.rows.length, 2, 'but it is still listed');
+  });
+
+  it('states the yearly commitment as twelve months of the monthly one', () => {
+    const data = baseData();
+    data.subscriptions.push(
+      subscription({ amount: 1_200, cycle: 'monthly' }),
+      subscription({ amount: 12_000, cycle: 'yearly' }),
+    );
+
+    const overview = getSubscriptionOverview(data, TODAY);
+
+    assert.equal(overview.monthlyTotal, 2_200);
+    assert.equal(overview.yearlyTotal, 26_400);
+  });
+
+  it('calls a subscription overdue once its due date has passed', () => {
+    const data = baseData();
+    data.subscriptions.push(subscription({ nextDueDate: '2026-09-09' }));
+
+    const row = getSubscriptionOverview(data, TODAY).rows[0];
+
+    assert.equal(row.state, 'overdue');
+    assert.equal(row.daysUntilDue, -1);
+  });
+
+  it('calls a subscription due soon within the coming week, and scheduled after it', () => {
+    const data = baseData();
+    data.subscriptions.push(
+      subscription({ name: 'Soon', nextDueDate: '2026-09-16' }),
+      subscription({ name: 'Later', nextDueDate: '2026-09-25' }),
+    );
+
+    const state = (name: string) =>
+      getSubscriptionOverview(data, TODAY).rows.find((r) => r.subscription.name === name)!.state;
+
+    assert.equal(state('Soon'), 'due-soon');
+    assert.equal(state('Later'), 'scheduled');
+    assert.equal(getSubscriptionOverview(data, TODAY).dueSoonCount, 1);
+  });
+
+  it('reports a paused subscription as paused whatever its due date says', () => {
+    const data = baseData();
+    data.subscriptions.push(subscription({ nextDueDate: '2026-09-01', active: false }));
+
+    assert.equal(getSubscriptionOverview(data, TODAY).rows[0].state, 'paused');
+    assert.equal(getSubscriptionOverview(data, TODAY).dueSoonCount, 0);
+  });
+
+  it('lists what needs paying first and what is paused last', () => {
+    const data = baseData();
+    data.subscriptions.push(
+      subscription({ name: 'Later', nextDueDate: '2026-09-25' }),
+      subscription({ name: 'Paused', nextDueDate: '2026-09-01', active: false }),
+      subscription({ name: 'Overdue', nextDueDate: '2026-09-02' }),
+      subscription({ name: 'Soon', nextDueDate: '2026-09-12' }),
+    );
+
+    assert.deepEqual(
+      getSubscriptionOverview(data, TODAY).rows.map((r) => r.subscription.name),
+      ['Overdue', 'Soon', 'Later', 'Paused'],
+    );
   });
 });

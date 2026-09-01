@@ -2,27 +2,34 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { CreditCard, Pencil, Plus, Trash2 } from 'lucide-react';
+import { CreditCard, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
+import { useAppData } from '@/components/AppDataProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { FormError, TextField } from '@/components/ui/Field';
+import { FormError, SelectField, TextField } from '@/components/ui/Field';
 import { DetailRow, EmptyState, IconTile } from '@/components/ui/Primitives';
 import { IconPicker } from '@/components/ui/IconPicker';
 import { apiRequest } from '@/lib/client/api';
 import { iconFor } from '@/lib/icons/registry';
 import { DEFAULT_ACCOUNT_ICON, type IconName } from '@/lib/icons/names';
+import { formatDate, todayIso } from '@/lib/finance/dates';
 import { formatCurrency } from '@/lib/finance/format';
-import type { AccountBalance } from '@/lib/finance/calculations';
-import type { Account } from '@/lib/types';
+import type { AccountBalance, AccountContents } from '@/lib/finance/calculations';
+import type { Account, Deposit } from '@/lib/types';
 
 /**
  * Accounts and their balances.
  *
  * A balance is never typed in: it is the opening balance plus income received,
- * plus repayments received, minus everything paid out. The breakdown sits on
- * each card so the number is checkable rather than something to trust.
+ * plus repayments received, plus money added, minus everything paid out. The
+ * breakdown sits on each card so the number is checkable rather than something
+ * to trust.
+ *
+ * "Add money" is the one way to put money somewhere without earning it. Each
+ * entry names the category or savings pot it is for, which is what lets a card
+ * say not just how much is in an account but what it is for.
  */
 
 interface AccountValues {
@@ -31,23 +38,130 @@ interface AccountValues {
   openingBalance: string;
 }
 
+interface DepositValues {
+  amount: string;
+  categoryId: string;
+  date: string;
+  note: string;
+}
+
 export function AccountsManager({
   balances,
+  contents,
+  deposits,
   symbol,
   unassigned,
 }: {
   balances: AccountBalance[];
+  contents: AccountContents[];
+  deposits: Deposit[];
   symbol: string;
   unassigned: { income: number; spending: number };
 }) {
   const router = useRouter();
   const toast = useToast();
+  const { categories, settings } = useAppData();
+
+  const spending = categories.filter((c) => c.type === 'expense');
+  const setAside = categories.filter((c) => c.type !== 'expense');
+  // Set-aside first: money you deliberately place somewhere is usually a pot.
+  const defaultCategoryId = (setAside[0] ?? spending[0])?.id ?? '';
 
   const [editing, setEditing] = useState<{ id?: string; values: AccountValues } | null>(null);
   const [deleting, setDeleting] = useState<AccountBalance | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const [money, setMoney] = useState<AccountBalance | null>(null);
+  const [depositId, setDepositId] = useState<string | null>(null);
+  const [depositValues, setDepositValues] = useState<DepositValues>({
+    amount: '',
+    categoryId: '',
+    date: todayIso(),
+    note: '',
+  });
+  const [depositErrors, setDepositErrors] = useState<Record<string, string>>({});
+  const [depositFormError, setDepositFormError] = useState<string | null>(null);
+  const [savingDeposit, setSavingDeposit] = useState(false);
+  const [deletingDeposit, setDeletingDeposit] = useState<Deposit | null>(null);
+
+  function resetDepositForm() {
+    setDepositId(null);
+    setDepositValues({ amount: '', categoryId: defaultCategoryId, date: todayIso(), note: '' });
+    setDepositErrors({});
+    setDepositFormError(null);
+  }
+
+  function openMoney(balance: AccountBalance) {
+    resetDepositForm();
+    setMoney(balance);
+  }
+
+  function editDeposit(entry: Deposit) {
+    setDepositErrors({});
+    setDepositFormError(null);
+    setDepositId(entry.id);
+    setDepositValues({
+      amount: String(entry.amount),
+      categoryId: entry.categoryId,
+      date: entry.date,
+      note: entry.note,
+    });
+  }
+
+  function setDeposit<K extends keyof DepositValues>(key: K, value: DepositValues[K]) {
+    setDepositValues((current) => ({ ...current, [key]: value }));
+    setDepositErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  async function saveDeposit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!money || savingDeposit) return;
+
+    setSavingDeposit(true);
+    setDepositFormError(null);
+    setDepositErrors({});
+
+    const response = await apiRequest<{ deposit: Deposit }>(
+      depositId ? `/api/deposits/${depositId}` : '/api/deposits',
+      {
+        method: depositId ? 'PUT' : 'POST',
+        body: { ...depositValues, accountId: money.account.id },
+      },
+    );
+
+    setSavingDeposit(false);
+
+    if (!response.ok) {
+      setDepositFormError(response.error);
+      setDepositErrors(response.fieldErrors ?? {});
+      return;
+    }
+
+    toast.success(depositId ? 'Entry updated.' : `Added to ${money.account.name}.`);
+    resetDepositForm();
+    router.refresh();
+  }
+
+  async function confirmDeleteDeposit() {
+    if (!deletingDeposit) return;
+    const response = await apiRequest(`/api/deposits/${deletingDeposit.id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      toast.error(response.error);
+      return;
+    }
+    toast.success('Entry removed.');
+    setDeletingDeposit(null);
+    router.refresh();
+  }
+
+  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Uncategorised';
 
   function openAdd() {
     setFormError(null);
@@ -93,10 +207,15 @@ export function AccountsManager({
     router.refresh();
   }
 
+  const depositsIn = (accountId: string) => deposits.filter((d) => d.accountId === accountId);
+
   async function confirmDelete() {
     if (!deleting) return;
-    // The account has history, so entries are kept and simply unlinked.
-    const strategy = deleting.transactionCount > 0 ? '?strategy=unassign' : '';
+    // Transactions are kept and simply unlinked; money added to the account
+    // goes with it, since a deposit with no account records nothing. Either one
+    // means the delete has to be confirmed rather than done silently.
+    const history = deleting.transactionCount + depositsIn(deleting.account.id).length;
+    const strategy = history > 0 ? '?strategy=unassign' : '';
     const response = await apiRequest(`/api/accounts/${deleting.account.id}${strategy}`, { method: 'DELETE' });
     if (!response.ok) {
       toast.error(response.error);
@@ -132,6 +251,7 @@ export function AccountsManager({
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {balances.map((balance) => {
             const Icon = iconFor(balance.account.icon, DEFAULT_ACCOUNT_ICON);
+            const stored = contents.find((c) => c.account.id === balance.account.id);
             return (
               <div key={balance.account.id} className="surface group flex flex-col p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -187,12 +307,44 @@ export function AccountsManager({
                       value={`+ ${formatCurrency(balance.receivedIn, { currencySymbol: symbol })}`}
                     />
                   )}
+                  {balance.addedIn > 0 && (
+                    <DetailRow
+                      label="Money added"
+                      tone="positive"
+                      value={`+ ${formatCurrency(balance.addedIn, { currencySymbol: symbol })}`}
+                    />
+                  )}
                   <DetailRow
                     label="Paid out"
                     tone="muted"
                     value={`− ${formatCurrency(balance.paidOut, { currencySymbol: symbol })}`}
                   />
                 </dl>
+
+                {stored && stored.slices.length > 0 && (
+                  <dl className="mt-3 space-y-1.5 border-t border-line pt-3">
+                    <p className="label mb-1">What is in here</p>
+                    {stored.slices.map((slice) => (
+                      <DetailRow
+                        key={slice.category.id}
+                        label={slice.category.name}
+                        value={formatCurrency(slice.amount, { currencySymbol: symbol })}
+                      />
+                    ))}
+                  </dl>
+                )}
+
+                <div className="mt-3 border-t border-line pt-3">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={Plus}
+                    className="w-full"
+                    onClick={() => openMoney(balance)}
+                  >
+                    Add money
+                  </Button>
+                </div>
               </div>
             );
           })}
@@ -263,11 +415,28 @@ export function AccountsManager({
         title="Delete this account?"
         body={
           deleting ? (
-            deleting.transactionCount > 0 ? (
+            deleting.transactionCount > 0 || depositsIn(deleting.account.id).length > 0 ? (
               <>
-                <strong className="font-medium text-ink">{deleting.account.name}</strong> is used by{' '}
-                {deleting.transactionCount} entr{deleting.transactionCount === 1 ? 'y' : 'ies'}. Those entries are kept
-                and still count towards your spending and budgets — they simply stop being linked to an account.
+                <strong className="font-medium text-ink">{deleting.account.name}</strong>
+                {deleting.transactionCount > 0 && (
+                  <>
+                    {' '}
+                    is used by {deleting.transactionCount} entr
+                    {deleting.transactionCount === 1 ? 'y' : 'ies'}, which are kept and still count towards your
+                    spending and budgets — they simply stop being linked to an account
+                  </>
+                )}
+                {depositsIn(deleting.account.id).length > 0 && (
+                  <>
+                    {deleting.transactionCount > 0 ? ', and' : ''} holds{' '}
+                    {formatCurrency(
+                      depositsIn(deleting.account.id).reduce((total, d) => total + d.amount, 0),
+                      { currencySymbol: symbol },
+                    )}{' '}
+                    of money you added, which is removed with it
+                  </>
+                )}
+                .
               </>
             ) : (
               <>
@@ -279,6 +448,158 @@ export function AccountsManager({
         }
         onConfirm={confirmDelete}
         onCancel={() => setDeleting(null)}
+      />
+
+      <Modal
+        open={money !== null}
+        onClose={() => !savingDeposit && setMoney(null)}
+        title={money ? `Money in ${money.account.name}` : 'Money'}
+        description="Say what this money is for. It is neither income nor spending — it only moves this balance."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setMoney(null)} disabled={savingDeposit}>
+              Close
+            </Button>
+            <Button type="submit" form="deposit-form" variant="primary" loading={savingDeposit}>
+              {depositId ? 'Save changes' : 'Add money'}
+            </Button>
+          </>
+        }
+      >
+        {money && (
+          <div className="space-y-5">
+            <form id="deposit-form" onSubmit={saveDeposit} noValidate className="space-y-4">
+              <FormError message={depositFormError} />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TextField
+                  label="Amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  required
+                  prefix={symbol}
+                  placeholder="0"
+                  autoComplete="off"
+                  value={depositValues.amount}
+                  error={depositErrors.amount}
+                  onChange={(e) => setDeposit('amount', e.target.value)}
+                />
+                <TextField
+                  label="Date"
+                  type="date"
+                  required
+                  value={depositValues.date}
+                  error={depositErrors.date}
+                  onChange={(e) => setDeposit('date', e.target.value)}
+                />
+              </div>
+
+              <SelectField
+                label="What is it for"
+                required
+                hint="The category or savings pot this money belongs to."
+                value={depositValues.categoryId}
+                error={depositErrors.categoryId}
+                onChange={(e) => setDeposit('categoryId', e.target.value)}
+              >
+                {setAside.length > 0 && (
+                  <optgroup label="Set aside">
+                    {setAside.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {spending.length > 0 && (
+                  <optgroup label="Spending">
+                    {spending.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </SelectField>
+
+              <TextField
+                label="Note"
+                maxLength={200}
+                autoComplete="off"
+                placeholder="Moved from salary"
+                value={depositValues.note}
+                error={depositErrors.note}
+                onChange={(e) => setDeposit('note', e.target.value)}
+              />
+
+              {depositId && (
+                <Button type="button" variant="ghost" size="sm" onClick={resetDepositForm}>
+                  Cancel edit
+                </Button>
+              )}
+            </form>
+
+            <div className="border-t border-line pt-4">
+              <p className="label mb-2">Already in here</p>
+              {depositsIn(money.account.id).length === 0 ? (
+                <p className="text-sm text-muted">Nothing yet. What you add above is listed here.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {depositsIn(money.account.id).map((entry) => (
+                    <li key={entry.id} className="flex items-center gap-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base text-ink">{categoryName(entry.categoryId)}</p>
+                        <p className="truncate text-sm text-muted">
+                          {formatDate(entry.date, settings.dateFormat)}
+                          {entry.note && ` · ${entry.note}`}
+                        </p>
+                      </div>
+                      <span className="tnum shrink-0 text-base font-medium text-ink">
+                        {formatCurrency(entry.amount, { currencySymbol: symbol })}
+                      </span>
+                      <div className="flex shrink-0 gap-0.5">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          iconOnly
+                          icon={Pencil}
+                          aria-label="Edit entry"
+                          onClick={() => editDeposit(entry)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          iconOnly
+                          icon={Trash2}
+                          aria-label="Remove entry"
+                          onClick={() => setDeletingDeposit(entry)}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={deletingDeposit !== null}
+        title="Remove this money?"
+        body={
+          deletingDeposit ? (
+            <>
+              <strong className="font-medium text-ink">
+                {formatCurrency(deletingDeposit.amount, { currencySymbol: symbol })}
+              </strong>{' '}
+              set against {categoryName(deletingDeposit.categoryId)} will be removed, and the balance recalculated.
+            </>
+          ) : null
+        }
+        onConfirm={confirmDeleteDeposit}
+        onCancel={() => setDeletingDeposit(null)}
       />
     </>
   );

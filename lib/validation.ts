@@ -1,6 +1,7 @@
 import { isValidDate, isValidMonth, todayIso } from './finance/dates';
 import { DEFAULT_ACCOUNT_ICON, DEFAULT_CATEGORY_ICON, resolveIconName } from './icons/names';
 import type {
+  BillingCycle,
   CategoryType,
   DateFormat,
   DebtDirection,
@@ -154,9 +155,18 @@ function categoryRef(
 }
 
 /** Accounts are optional everywhere, but a named account must actually exist. */
-function accountRef(v: Validator, data: FinanceData, raw: unknown, field = 'accountId'): string | null {
+function accountRef(
+  v: Validator,
+  data: FinanceData,
+  raw: unknown,
+  field = 'accountId',
+  { required = false } = {},
+): string | null {
   const id = text(raw);
-  if (!id) return null;
+  if (!id) {
+    if (required) v.fail(field, 'Account is required.');
+    return null;
+  }
   if (!data.accounts.some((a) => a.id === id)) {
     v.fail(field, 'That account no longer exists.');
     return null;
@@ -373,6 +383,86 @@ export function validateDebt(body: unknown): Validated<DebtInput> {
     date: debtDate,
     dueDate,
     description: optionalText(body.description, 200),
+    notes: optionalText(body.notes, 2000),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Money added to an account
+// ---------------------------------------------------------------------------
+
+export interface DepositInput {
+  accountId: string;
+  amount: number;
+  categoryId: string;
+  date: string;
+  note: string;
+}
+
+/**
+ * Both references are required: a deposit exists to say *where* money sits and
+ * *what it is for*, so one without an account or a category records nothing.
+ */
+export function validateDeposit(data: FinanceData, body: unknown): Validated<DepositInput> {
+  const v = new Validator();
+  if (!isObject(body)) {
+    return { ok: false, message: 'The request was not understood.', fieldErrors: {} };
+  }
+
+  return v.result<DepositInput>({
+    accountId: accountRef(v, data, body.accountId, 'accountId', { required: true }) ?? '',
+    amount: amount(v, body.amount, 'amount', 'Amount'),
+    categoryId: categoryRef(v, data, body.categoryId) ?? '',
+    date: date(v, body.date),
+    note: optionalText(body.note, 200),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionInput {
+  name: string;
+  amount: number;
+  cycle: BillingCycle;
+  nextDueDate: string;
+  categoryId: string | null;
+  accountId: string | null;
+  icon: string;
+  active: boolean;
+  notes: string;
+}
+
+const BILLING_CYCLES: BillingCycle[] = ['monthly', 'quarterly', 'yearly'];
+
+/**
+ * The category is required: paying a subscription writes an ordinary outgoing
+ * transaction, and an outgoing transaction with no category cannot be reported
+ * on. Better to insist here than to write a row the budget cannot see.
+ */
+export function validateSubscription(
+  data: FinanceData,
+  body: unknown,
+): Validated<SubscriptionInput> {
+  const v = new Validator();
+  if (!isObject(body)) {
+    return { ok: false, message: 'The request was not understood.', fieldErrors: {} };
+  }
+
+  const cycle = text(body.cycle) as BillingCycle;
+  if (!BILLING_CYCLES.includes(cycle)) v.fail('cycle', 'Choose how often it is charged.');
+
+  return v.result<SubscriptionInput>({
+    name: requiredText(v, body.name, 'name', 'Name'),
+    amount: amount(v, body.amount, 'amount', 'Amount'),
+    cycle: BILLING_CYCLES.includes(cycle) ? cycle : 'monthly',
+    nextDueDate: date(v, body.nextDueDate, 'nextDueDate', 'Next due date'),
+    categoryId: categoryRef(v, data, body.categoryId),
+    accountId: accountRef(v, data, body.accountId),
+    icon: resolveIconName(body.icon, 'repeat'),
+    // Absent means running; only an explicit `false` pauses it.
+    active: body.active !== false,
     notes: optionalText(body.notes, 2000),
   });
 }
