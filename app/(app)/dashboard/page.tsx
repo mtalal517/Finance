@@ -10,6 +10,7 @@ import {
   getMonthSummary,
   getRecentTransactions,
   getSpendingComparison,
+  round2,
 } from '@/lib/finance/calculations';
 import { buildCategoryColors, OTHER_COLOR } from '@/lib/finance/chartPalette';
 import { formatCurrency, formatPercent } from '@/lib/finance/format';
@@ -91,7 +92,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           amount={summary.expenses}
           symbol={symbol}
           icon={Receipt}
-          hint={`${summary.expenseTransactionCount} transaction${summary.expenseTransactionCount === 1 ? '' : 's'}`}
+          hint={`${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`}
         />
         <StatItem
           label="Savings"
@@ -99,14 +100,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           symbol={symbol}
           tone={summary.savings > 0 ? 'positive' : 'default'}
           icon={PiggyBank}
-          hint={summary.income > 0 ? `${formatPercent(summary.savingsRate, 0)} of income` : 'Set aside this month'}
+          hint={setAsideHint(
+            budget.allocatedSavings,
+            summary.savings,
+            symbol,
+            summary.income > 0 ? `${formatPercent(summary.savingsRate, 0)} of income` : 'Set aside this month',
+          )}
         />
         <StatItem
           label="Invested"
           amount={summary.investments}
           symbol={symbol}
           icon={TrendingUp}
-          hint="Moved into investments"
+          hint={setAsideHint(budget.allocatedInvestments, summary.investments, symbol, 'Moved into investments')}
         />
         <StatItem
           label="Remaining"
@@ -159,11 +165,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </Link>
               }
             />
-            <BudgetOverview rows={budget.expenseRows} month={month} symbol={symbol} />
+            <BudgetOverview
+              rows={budget.expenseRows}
+              setAsideRows={budget.setAsideRows}
+              month={month}
+              symbol={symbol}
+            />
           </Card>
 
           <Card>
-            <CardHeader title="Where it went" subtitle="Spending only" />
+            <CardHeader title="Where it went" subtitle="Everything that left this month" />
             {slices.length > 0 ? (
               <CategoryDonut slices={slices} total={summary.expenses} symbol={symbol} />
             ) : (
@@ -202,4 +213,24 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       )}
     </>
   );
+}
+
+/**
+ * These two figures are made of transactions, never of allocations — budgeting
+ * 20,000 to Emergency does not move 20,000. When there *is* an allocation the
+ * hint says so, because a bare "Rs. 0" against a funded-looking budget reads as
+ * a broken number rather than as money you have not transferred yet.
+ */
+function setAsideHint(
+  allocated: number,
+  left: number,
+  symbol: string,
+  fallback: string,
+): string {
+  if (allocated <= 0) return fallback;
+  const money = (value: number) => formatCurrency(value, { currencySymbol: symbol });
+  const drawn = round2(allocated - left);
+  return drawn > 0
+    ? `${money(drawn)} drawn of ${money(allocated)} set aside`
+    : `${money(allocated)} set aside, untouched`;
 }

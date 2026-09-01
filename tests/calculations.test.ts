@@ -15,24 +15,72 @@ import { baseData, income, txn } from './helpers';
 const SEP = '2026-09';
 
 describe('month summary', () => {
-  it('keeps savings and investments out of the spending total', () => {
+  it('treats an allocation to a savings category as the act of saving', () => {
     const data = baseData();
     data.income.push(income(110_000, '2026-09-01'));
+    data.budgets.push({
+      id: 'budget_2026_09',
+      month: SEP,
+      categories: { transport: 5_000, food: 10_000, savings: 20_000, investment: 20_000 },
+    });
     data.expenses.push(
       txn({ amount: 4_300, date: '2026-09-02', categoryId: 'transport' }),
       txn({ amount: 8_050, date: '2026-09-05', categoryId: 'food' }),
-      txn({ amount: 20_000, date: '2026-09-05', categoryId: 'savings' }),
-      txn({ amount: 20_000, date: '2026-09-06', categoryId: 'investment' }),
     );
 
     const summary = getMonthSummary(data, SEP);
 
     assert.equal(summary.income, 110_000);
-    assert.equal(summary.expenses, 12_350, 'only expense-type categories count as spending');
-    assert.equal(summary.savings, 20_000);
+    assert.equal(summary.expenses, 12_350);
+    assert.equal(summary.savings, 20_000, 'budgeted to a savings category, so it is set aside');
     assert.equal(summary.investments, 20_000);
-    assert.equal(summary.outflow, 52_350);
-    assert.equal(summary.remaining, 57_650, 'income minus everything that left the wallet');
+    assert.equal(summary.outflow, 52_350, 'spent plus committed');
+    assert.equal(summary.remaining, 57_650, 'income neither spent nor committed');
+  });
+
+  it('draws a pot down when money is spent against it, and still counts the spending', () => {
+    const data = baseData();
+    data.income.push(income(110_000, '2026-09-01'));
+    data.budgets.push({
+      id: 'budget_2026_09',
+      month: SEP,
+      categories: { food: 10_000, savings: 20_000 },
+    });
+    data.expenses.push(
+      txn({ amount: 8_050, date: '2026-09-05', categoryId: 'food' }),
+      txn({ amount: 3_000, date: '2026-09-07', categoryId: 'savings' }),
+    );
+
+    const summary = getMonthSummary(data, SEP);
+
+    assert.equal(summary.savings, 17_000, 'the pot is drawn down by what was taken out of it');
+    assert.equal(summary.expenses, 11_050, 'the money left an account, so it is spending too');
+    assert.equal(summary.outflow, 28_050);
+    assert.equal(summary.remaining, 81_950);
+  });
+
+  it('caps a pot at zero and lets the excess stand as plain spending', () => {
+    const data = baseData();
+    data.income.push(income(110_000, '2026-09-01'));
+    data.budgets.push({ id: 'budget_2026_09', month: SEP, categories: { savings: 5_000 } });
+    data.expenses.push(txn({ amount: 8_000, date: '2026-09-07', categoryId: 'savings' }));
+
+    const summary = getMonthSummary(data, SEP);
+
+    assert.equal(summary.savings, 0, 'you cannot have less than nothing set aside');
+    assert.equal(summary.expenses, 8_000);
+    assert.equal(summary.remaining, 102_000, 'the 3,000 drawn past the pot comes out of income');
+  });
+
+  it('sets nothing aside for a savings category with no allocation', () => {
+    const data = baseData();
+    data.income.push(income(110_000, '2026-09-01'));
+    data.expenses.push(txn({ amount: 20_000, date: '2026-09-05', categoryId: 'savings' }));
+
+    const summary = getMonthSummary(data, SEP);
+
+    assert.equal(summary.savings, 0, 'the budget is what sets money aside, not the transaction');
+    assert.equal(summary.expenses, 20_000);
   });
 
   it('ignores transactions from other months', () => {
@@ -107,6 +155,40 @@ describe('budget vs actual', () => {
     assert.equal(row.status, 'unbudgeted');
     assert.equal(row.budget, 0);
     assert.equal(row.spent, 900);
+  });
+
+  it('separates set-aside allocations from spending, and totals them by type', () => {
+    const data = baseData();
+    data.budgets.push({
+      id: 'budget_2026_09',
+      month: SEP,
+      categories: { transport: 15_000, savings: 20_000, investment: 10_000 },
+    });
+    data.expenses.push(txn({ amount: 4_300, date: '2026-09-02', categoryId: 'transport' }));
+
+    const overview = getBudgetVsActual(data, SEP);
+
+    assert.deepEqual(overview.expenseRows.map((r) => r.category.id), ['transport']);
+    assert.deepEqual(overview.setAsideRows.map((r) => r.category.id), ['savings', 'investment']);
+    assert.equal(overview.allocatedSavings, 20_000);
+    assert.equal(overview.allocatedInvestments, 10_000);
+  });
+
+  it('keeps a set-aside allocation visible when nothing has been moved into it', () => {
+    const data = baseData();
+    data.budgets.push({ id: 'budget_2026_09', month: SEP, categories: { savings: 20_000 } });
+
+    const overview = getBudgetVsActual(data, SEP);
+    const row = overview.setAsideRows.find((r) => r.category.id === 'savings')!;
+
+    assert.equal(row.budget, 20_000);
+    assert.equal(row.spent, 0);
+    assert.equal(overview.allocatedSavings, 20_000);
+    assert.equal(
+      getMonthSummary(data, SEP).savings,
+      20_000,
+      'the allocation is the saving, with nothing drawn back out of it',
+    );
   });
 
   it('does not invent rows for untouched categories', () => {

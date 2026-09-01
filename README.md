@@ -59,18 +59,25 @@ lock you out of the app.
 
 ## How the app thinks about money
 
-Three kinds of outgoing money are tracked separately, because lumping them together
-makes the numbers lie:
-
-- **Expenses** — money consumed. Food, fuel, bills.
-- **Savings** — money set aside for later.
-- **Investments** — money moved into an investment.
-
-Savings and investments never count as spending. A month works out as:
+Income is either spent or set aside, and a month works out as:
 
 ```
 Income − Expenses − Savings − Investments = Remaining (unallocated)
 ```
+
+- **Expenses** — every rupee that actually left an account this month.
+- **Savings** — what the budget allocated to categories of type `savings`, less
+  anything drawn back out of them.
+- **Investments** — the same arithmetic over categories of type `investment`.
+
+**Allocating is the act of saving.** Budgeting 20,000 to Emergency sets 20,000 aside
+there and then; no transaction is needed to make it count. Recording a transaction
+against a savings category does the opposite — it draws that pot back down, and
+because the money really did leave an account it counts in Expenses too. The two
+movements cancel in the identity above, so the month always balances.
+
+Draw more out of a pot than was put in and the pot stops at zero: the excess was
+never set aside, so it stands as ordinary spending and eats into Remaining.
 
 A category's `type` decides which bucket it falls into, and you can change or add
 categories in Settings.
@@ -80,6 +87,10 @@ categories in Settings.
 A budget is just a month plus an amount per category. Nothing else is stored — *spent*,
 *remaining* and *% used* are worked out from your actual transactions every time they
 are shown, so the budget and the transaction list can never disagree.
+
+Spending categories count **up**: the row fills as the allocation is used. Savings and
+investment categories count **down**: the allocation fills the pot and the row shows how
+much of it is left.
 
 Click any category on the Budget or Dashboard page to see exactly what that budget was
 spent on: every transaction with its date, description and account, plus the count and

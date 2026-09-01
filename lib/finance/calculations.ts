@@ -83,21 +83,23 @@ export interface MonthSummary {
   month: string;
   income: number;
   incomeByType: Record<IncomeType, number>;
-  /** Money consumed — categories of type `expense` only. */
+  /** Every rupee that left this month, whichever pot it came out of. */
   expenses: number;
-  /** Money set aside — categories of type `savings`. Never counted as spending. */
+  /**
+   * Money still set aside: what the budget allocated to savings categories,
+   * less whatever has been drawn back out of them. Allocating is the act of
+   * saving — a transaction against a savings category spends that saving.
+   */
   savings: number;
-  /** Money moved into investments — categories of type `investment`. */
+  /** The same arithmetic over categories of type `investment`. */
   investments: number;
-  /** expenses + savings + investments: everything that left the wallet. */
+  /** expenses + savings + investments: income consumed or committed. */
   outflow: number;
-  /** Income that has not been spent, saved or invested yet. */
+  /** Income neither spent nor committed to a pot. */
   remaining: number;
-  /** Every outgoing row in the month, transfers to savings included. */
+  /** Every outgoing row in the month. */
   transactionCount: number;
-  /** Only the rows that count as spending — what the Expenses figure is made of. */
-  expenseTransactionCount: number;
-  /** Portion of income kept as savings, as a percentage. */
+  /** Portion of income still set aside as savings, as a percentage. */
   savingsRate: number;
 }
 
@@ -108,24 +110,52 @@ const EMPTY_INCOME_BY_TYPE: Record<IncomeType, number> = {
   other: 0,
 };
 
-export function getMonthSummary(data: FinanceData, month: string): MonthSummary {
-  const categories = categoryIndex(data);
-  const transactions = outgoingInMonth(data, month);
+/** How much has been taken out of each category this month. */
+export function drawnByCategory(data: FinanceData, month: string): Map<string, number> {
+  const drawn = new Map<string, number>();
+  for (const t of outgoingInMonth(data, month)) {
+    if (!t.categoryId) continue;
+    drawn.set(t.categoryId, (drawn.get(t.categoryId) ?? 0) + t.amount);
+  }
+  return drawn;
+}
 
-  let expenses = 0;
+/**
+ * What is left in the savings and investment pots this month.
+ *
+ * A pot is filled by allocating to it in the budget, not by recording a
+ * transaction — deciding that 20,000 of this month's income belongs to
+ * Emergency is the act of saving it. Spending against that category draws the
+ * pot back down, and a pot cannot go below zero: draw past what you set aside
+ * and the excess is simply spending, which the `expenses` total already counts.
+ */
+function potsRemaining(data: FinanceData, month: string): { savings: number; investments: number } {
+  const categories = categoryIndex(data);
+  const drawn = drawnByCategory(data, month);
+
   let savings = 0;
   let investments = 0;
-  let expenseCount = 0;
+  for (const [categoryId, allocated] of Object.entries(budgetForMonth(data, month))) {
+    const type = categories.get(categoryId)?.type;
+    if (type !== 'savings' && type !== 'investment') continue;
 
-  for (const t of transactions) {
-    const type = (t.categoryId && categories.get(t.categoryId)?.type) || 'expense';
-    if (type === 'savings') savings += t.amount;
-    else if (type === 'investment') investments += t.amount;
-    else {
-      expenses += t.amount;
-      expenseCount += 1;
-    }
+    const left = Math.max(0, allocated - (drawn.get(categoryId) ?? 0));
+    if (type === 'savings') savings += left;
+    else investments += left;
   }
+  return { savings, investments };
+}
+
+export function getMonthSummary(data: FinanceData, month: string): MonthSummary {
+  const transactions = outgoingInMonth(data, month);
+
+  // Every outgoing row is spending, including one that draws down a pot: the
+  // money did leave, and hiding it would make the spending trend understate
+  // the month.
+  let expenses = 0;
+  for (const t of transactions) expenses += t.amount;
+
+  let { savings, investments } = potsRemaining(data, month);
 
   const incomeByType = { ...EMPTY_INCOME_BY_TYPE };
   let income = 0;
@@ -155,7 +185,6 @@ export function getMonthSummary(data: FinanceData, month: string): MonthSummary 
     outflow,
     remaining: round2(income - outflow),
     transactionCount: transactions.length,
-    expenseTransactionCount: expenseCount,
     savingsRate: safePercent(savings, income),
   };
 }
@@ -183,10 +212,22 @@ export interface BudgetOverview {
   totalAllocated: number;
   /** Income the budget has not assigned to any category. Negative means over-allocated. */
   unallocated: number;
+  /** Everything that actually left an account this month. */
   totalSpent: number;
   rows: BudgetRow[];
-  /** Rows for categories of type `expense` only — what the dashboard shows. */
+  /** Rows for categories of type `expense` only — money meant to be consumed. */
   expenseRows: BudgetRow[];
+  /**
+   * Rows for savings and investment categories. These are money you plan to set
+   * aside, not to spend, so they are listed apart rather than folded into the
+   * spending rows — but they are listed, because an allocation nothing has been
+   * moved into yet is exactly the thing worth seeing.
+   */
+  setAsideRows: BudgetRow[];
+  /** Allocated to savings categories this month, whether or not it has moved. */
+  allocatedSavings: number;
+  /** Allocated to investment categories this month, whether or not it has moved. */
+  allocatedInvestments: number;
   hasBudget: boolean;
 }
 
@@ -235,14 +276,27 @@ export function getBudgetVsActual(data: FinanceData, month: string): BudgetOverv
   const summary = getMonthSummary(data, month);
   const totalAllocated = sum(Object.values(allocations));
 
+  // Allocated per type, counted from the allocations rather than from the rows,
+  // so an allocation to a category with no transactions still counts.
+  const categories = categoryIndex(data);
+  const allocatedTo = (type: Category['type']): number =>
+    sum(
+      Object.entries(allocations)
+        .filter(([categoryId]) => categories.get(categoryId)?.type === type)
+        .map(([, amount]) => amount),
+    );
+
   return {
     month,
     income: summary.income,
     totalAllocated,
     unallocated: round2(summary.income - totalAllocated),
-    totalSpent: summary.outflow,
+    totalSpent: summary.expenses,
     rows,
     expenseRows: rows.filter((r) => r.category.type === 'expense'),
+    setAsideRows: rows.filter((r) => r.category.type !== 'expense'),
+    allocatedSavings: allocatedTo('savings'),
+    allocatedInvestments: allocatedTo('investment'),
     hasBudget: Object.keys(allocations).length > 0,
   };
 }
@@ -321,7 +375,10 @@ export function getCategoryBreakdown(
   month: string,
   options: { include?: Category['type'][] } = {},
 ): CategorySlice[] {
-  const include = options.include ?? ['expense'];
+  // Every type by default: drawing on a savings pot is spending like any other,
+  // so leaving those rows out would make the split disagree with the Expenses
+  // figure it sits beside.
+  const include = options.include ?? ['expense', 'savings', 'investment'];
   const categories = categoryIndex(data);
   const totals = new Map<string, { amount: number; count: number }>();
 
@@ -706,7 +763,7 @@ export function getInsights(data: FinanceData, month: string): Insight[] {
       insights.push({
         id: 'savings-rate',
         tone: rate >= 20 ? 'positive' : 'neutral',
-        text: `You have saved ${rate.toFixed(0)}% of your income this month.`,
+        text: `You have set aside ${rate.toFixed(0)}% of your income this month.`,
       });
     }
     if (summary.expenses > summary.income) {
@@ -768,8 +825,9 @@ export function getInsights(data: FinanceData, month: string): Insight[] {
   }
 
   // Budget pressure.
+  // Every row, pots included — drawing past what you set aside is worth saying.
   const budget = getBudgetVsActual(data, month);
-  const over = budget.expenseRows.filter((r) => r.status === 'over');
+  const over = budget.rows.filter((r) => r.status === 'over');
   if (over.length > 0) {
     const names = over.map((r) => r.category.name).join(', ');
     insights.push({
@@ -781,7 +839,7 @@ export function getInsights(data: FinanceData, month: string): Insight[] {
           : `${over.length} categories are over budget: ${names}.`,
     });
   } else if (budget.hasBudget) {
-    const nearing = budget.expenseRows.filter((r) => r.status === 'warning');
+    const nearing = budget.rows.filter((r) => r.status === 'warning');
     if (nearing.length > 0) {
       insights.push({
         id: 'near-budget',
