@@ -66,7 +66,9 @@ export function deposit(partial: Partial<Deposit> & { amount: number }): Deposit
     id: partial.id ?? `dep_${counter}`,
     accountId: partial.accountId ?? 'bank',
     amount: partial.amount,
-    categoryId: partial.categoryId ?? 'savings',
+    // `null` is a real choice now — money added need not say what it is for —
+    // so only an absent key falls back to a category.
+    categoryId: 'categoryId' in partial ? (partial.categoryId ?? null) : 'savings',
     date: partial.date ?? '2026-09-01',
     note: partial.note ?? '',
     createdAt: partial.createdAt ?? '2026-09-01T00:00:00.000Z',

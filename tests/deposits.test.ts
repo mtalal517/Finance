@@ -14,6 +14,7 @@ type Store = typeof import('../lib/data/store');
 type Mongo = typeof import('../lib/data/mongo');
 type Deposits = typeof import('../lib/data/deposits');
 type Accounts = typeof import('../lib/data/accounts');
+type Categories = typeof import('../lib/data/categories');
 type Calculations = typeof import('../lib/finance/calculations');
 
 let memory: MongoMemoryServer;
@@ -22,6 +23,7 @@ let store: Store;
 let mongo: Mongo;
 let deposits: Deposits;
 let accounts: Accounts;
+let categories: Categories;
 let calculations: Calculations;
 
 before(async () => {
@@ -36,6 +38,7 @@ before(async () => {
   mongo = require('../lib/data/mongo') as Mongo;
   deposits = require('../lib/data/deposits') as Deposits;
   accounts = require('../lib/data/accounts') as Accounts;
+  categories = require('../lib/data/categories') as Categories;
   calculations = require('../lib/finance/calculations') as Calculations;
 });
 
@@ -95,6 +98,25 @@ describe('adding money to an account', () => {
     assert.equal(updated.id, created.id);
     assert.equal(updated.createdAt, created.createdAt);
     assert.equal(await balanceOf('bank'), 25_000);
+  });
+
+  it('accepts money with no category, since what it is for is optional', async () => {
+    const created = await deposits.createDeposit({ ...EMERGENCY, categoryId: '' });
+
+    assert.equal(created.categoryId, null);
+    assert.equal(await balanceOf('bank'), 20_000);
+    assert.equal((await store.readData()).deposits.length, 1, 'and it survives being read back');
+  });
+
+  it('keeps the money when its category is deleted, only forgetting what it was for', async () => {
+    await deposits.createDeposit(EMERGENCY);
+
+    await categories.deleteCategory('savings');
+    const data = await store.readData();
+
+    assert.equal(data.deposits.length, 1);
+    assert.equal(data.deposits[0].categoryId, null);
+    assert.equal(await balanceOf('bank'), 20_000);
   });
 
   it('takes the money back out when deleted', async () => {

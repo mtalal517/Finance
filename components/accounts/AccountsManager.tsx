@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { CreditCard, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, CreditCard, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAppData } from '@/components/AppDataProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
@@ -16,7 +16,13 @@ import { iconFor } from '@/lib/icons/registry';
 import { DEFAULT_ACCOUNT_ICON, type IconName } from '@/lib/icons/names';
 import { formatDate, todayIso } from '@/lib/finance/dates';
 import { formatCurrency } from '@/lib/finance/format';
-import type { AccountBalance, AccountContents } from '@/lib/finance/calculations';
+import type {
+  AccountActivity,
+  AccountBalance,
+  AccountContents,
+  AccountEntry,
+  AccountEntryKind,
+} from '@/lib/finance/calculations';
 import type { Account, Deposit } from '@/lib/types';
 
 /**
@@ -27,9 +33,13 @@ import type { Account, Deposit } from '@/lib/types';
  * breakdown sits on each card so the number is checkable rather than something
  * to trust.
  *
- * "Add money" is the one way to put money somewhere without earning it. Each
- * entry names the category or savings pot it is for, which is what lets a card
- * say not just how much is in an account but what it is for.
+ * "Add money" is the one way to put money somewhere without earning it. An
+ * entry may name the category or savings pot it is for, which is what lets a
+ * card say not just how much is in an account but what it is for; saying so is
+ * optional, because often all you know is that the money arrived.
+ *
+ * Clicking a card opens everything that has moved through that account —
+ * income, spending, repayments and money added — in one list.
  */
 
 interface AccountValues {
@@ -45,13 +55,22 @@ interface DepositValues {
   note: string;
 }
 
+const KIND_LABELS: Record<AccountEntryKind, string> = {
+  income: 'Income',
+  spending: 'Spending',
+  repayment: 'Repayment',
+  added: 'Money added',
+};
+
 export function AccountsManager({
+  activity,
   balances,
   contents,
   deposits,
   symbol,
   unassigned,
 }: {
+  activity: AccountActivity[];
   balances: AccountBalance[];
   contents: AccountContents[];
   deposits: Deposit[];
@@ -64,14 +83,17 @@ export function AccountsManager({
 
   const spending = categories.filter((c) => c.type === 'expense');
   const setAside = categories.filter((c) => c.type !== 'expense');
-  // Set-aside first: money you deliberately place somewhere is usually a pot.
-  const defaultCategoryId = (setAside[0] ?? spending[0])?.id ?? '';
 
   const [editing, setEditing] = useState<{ id?: string; values: AccountValues } | null>(null);
   const [deleting, setDeleting] = useState<AccountBalance | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Held by id rather than by object so a refresh after an edit is reflected
+  // in the open modal instead of showing the figures it was opened with.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const viewing = balances.find((b) => b.account.id === viewingId) ?? null;
 
   const [money, setMoney] = useState<AccountBalance | null>(null);
   const [depositId, setDepositId] = useState<string | null>(null);
@@ -88,14 +110,31 @@ export function AccountsManager({
 
   function resetDepositForm() {
     setDepositId(null);
-    setDepositValues({ amount: '', categoryId: defaultCategoryId, date: todayIso(), note: '' });
+    // No category is preselected: guessing one would put money against a pot
+    // the user never chose, and the field is optional anyway.
+    setDepositValues({ amount: '', categoryId: '', date: todayIso(), note: '' });
     setDepositErrors({});
     setDepositFormError(null);
   }
 
   function openMoney(balance: AccountBalance) {
     resetDepositForm();
+    setViewingId(null);
     setMoney(balance);
+  }
+
+  /** Editing an added-money row from the history hands over to the money form. */
+  function editAddedMoney(balance: AccountBalance, id: string) {
+    const entry = deposits.find((d) => d.id === id);
+    if (!entry) return;
+    setViewingId(null);
+    setMoney(balance);
+    editDeposit(entry);
+  }
+
+  function removeAddedMoney(id: string) {
+    const entry = deposits.find((d) => d.id === id);
+    if (entry) setDeletingDeposit(entry);
   }
 
   function editDeposit(entry: Deposit) {
@@ -104,7 +143,7 @@ export function AccountsManager({
     setDepositId(entry.id);
     setDepositValues({
       amount: String(entry.amount),
-      categoryId: entry.categoryId,
+      categoryId: entry.categoryId ?? '',
       date: entry.date,
       note: entry.note,
     });
@@ -162,6 +201,8 @@ export function AccountsManager({
   }
 
   const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Uncategorised';
+  /** What an added-money row is called: its category, or simply what it is. */
+  const depositLabel = (entry: Deposit) => (entry.categoryId ? categoryName(entry.categoryId) : 'Money added');
 
   function openAdd() {
     setFormError(null);
@@ -208,6 +249,16 @@ export function AccountsManager({
   }
 
   const depositsIn = (accountId: string) => deposits.filter((d) => d.accountId === accountId);
+  const entriesFor = (accountId: string) =>
+    activity.find((a) => a.account.id === accountId)?.entries ?? [];
+
+  /** Date, what kind of movement it was, and any detail — without repeating the title. */
+  function metaFor(entry: AccountEntry): string {
+    const kind = KIND_LABELS[entry.kind];
+    return [formatDate(entry.date, settings.dateFormat), kind === entry.title ? '' : kind, entry.subtitle]
+      .filter(Boolean)
+      .join(' · ');
+  }
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -253,7 +304,7 @@ export function AccountsManager({
             const Icon = iconFor(balance.account.icon, DEFAULT_ACCOUNT_ICON);
             const stored = contents.find((c) => c.account.id === balance.account.id);
             return (
-              <div key={balance.account.id} className="surface group flex flex-col p-4">
+              <div key={balance.account.id} className="surface group relative flex flex-col p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2.5">
                     <IconTile icon={Icon} />
@@ -264,7 +315,7 @@ export function AccountsManager({
                       </p>
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                  <div className="relative z-10 flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                     <Button
                       size="sm"
                       variant="ghost"
@@ -334,7 +385,7 @@ export function AccountsManager({
                   </dl>
                 )}
 
-                <div className="mt-3 border-t border-line pt-3">
+                <div className="relative z-10 mt-3 border-t border-line pt-3">
                   <Button
                     size="sm"
                     variant="secondary"
@@ -345,6 +396,15 @@ export function AccountsManager({
                     Add money
                   </Button>
                 </div>
+
+                {/* Last so it lies over the card's text: clicking anywhere that
+                    is not one of the controls above opens the account. */}
+                <button
+                  type="button"
+                  className="absolute inset-0 rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label={`Open ${balance.account.name}`}
+                  onClick={() => setViewingId(balance.account.id)}
+                />
               </div>
             );
           })}
@@ -451,10 +511,135 @@ export function AccountsManager({
       />
 
       <Modal
+        open={viewing !== null}
+        onClose={() => setViewingId(null)}
+        title={viewing ? viewing.account.name : 'Account'}
+        description="Everything that has moved through this account."
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setViewingId(null)}>
+              Close
+            </Button>
+            {viewing && (
+              <Button variant="primary" icon={Plus} onClick={() => openMoney(viewing)}>
+                Add money
+              </Button>
+            )}
+          </>
+        }
+      >
+        {viewing && (
+          <div className="space-y-5">
+            <div>
+              <p
+                className={`tnum text-2xl font-semibold ${viewing.currentBalance < 0 ? 'text-danger' : 'text-ink'}`}
+              >
+                {formatCurrency(viewing.currentBalance, { currencySymbol: symbol })}
+              </p>
+              <p className="label mt-0.5">Current balance</p>
+            </div>
+
+            <dl className="space-y-1.5 border-t border-line pt-4">
+              <DetailRow
+                label="Opening"
+                tone="muted"
+                value={formatCurrency(viewing.openingBalance, { currencySymbol: symbol })}
+              />
+              <DetailRow
+                label="Income in"
+                tone="positive"
+                value={`+ ${formatCurrency(viewing.incomeIn, { currencySymbol: symbol })}`}
+              />
+              {viewing.receivedIn > 0 && (
+                <DetailRow
+                  label="Repayments in"
+                  tone="positive"
+                  value={`+ ${formatCurrency(viewing.receivedIn, { currencySymbol: symbol })}`}
+                />
+              )}
+              {viewing.addedIn > 0 && (
+                <DetailRow
+                  label="Money added"
+                  tone="positive"
+                  value={`+ ${formatCurrency(viewing.addedIn, { currencySymbol: symbol })}`}
+                />
+              )}
+              <DetailRow
+                label="Paid out"
+                tone="muted"
+                value={`− ${formatCurrency(viewing.paidOut, { currencySymbol: symbol })}`}
+              />
+            </dl>
+
+            <div className="border-t border-line pt-4">
+              <p className="label mb-2">History</p>
+              {entriesFor(viewing.account.id).length === 0 ? (
+                <p className="text-sm text-muted">
+                  Nothing has moved through this account yet. Money you add, income you point here and anything paid
+                  from it will be listed.
+                </p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {entriesFor(viewing.account.id).map((entry) => (
+                    <li key={`${entry.kind}-${entry.id}`} className="flex items-center gap-3 py-2.5">
+                      <span
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                          entry.direction === 'in' ? 'bg-positive-soft text-positive' : 'bg-sunken text-ink-soft'
+                        }`}
+                      >
+                        {entry.direction === 'in' ? (
+                          <ArrowDownLeft size={14} strokeWidth={2} aria-hidden />
+                        ) : (
+                          <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base text-ink">{entry.title}</p>
+                        <p className="truncate text-sm text-muted">{metaFor(entry)}</p>
+                      </div>
+                      <span
+                        className={`tnum shrink-0 text-base font-medium ${
+                          entry.direction === 'in' ? 'text-positive' : 'text-ink'
+                        }`}
+                      >
+                        {entry.direction === 'in' ? '+' : '−'}{' '}
+                        {formatCurrency(entry.amount, { currencySymbol: symbol })}
+                      </span>
+                      {entry.kind === 'added' && (
+                        <div className="flex shrink-0 gap-0.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            iconOnly
+                            icon={Pencil}
+                            aria-label="Edit money added"
+                            onClick={() => editAddedMoney(viewing, entry.id)}
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            iconOnly
+                            icon={Trash2}
+                            aria-label="Remove money added"
+                            onClick={() => removeAddedMoney(entry.id)}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
         open={money !== null}
         onClose={() => !savingDeposit && setMoney(null)}
         title={money ? `Money in ${money.account.name}` : 'Money'}
-        description="Say what this money is for. It is neither income nor spending — it only moves this balance."
+        description="Money added is neither income nor spending — it only moves this balance. Say what it is for if you know."
         footer={
           <>
             <Button variant="secondary" onClick={() => setMoney(null)} disabled={savingDeposit}>
@@ -497,12 +682,12 @@ export function AccountsManager({
 
               <SelectField
                 label="What is it for"
-                required
-                hint="The category or savings pot this money belongs to."
+                hint="Optional — the category or savings pot this money belongs to."
                 value={depositValues.categoryId}
                 error={depositErrors.categoryId}
                 onChange={(e) => setDeposit('categoryId', e.target.value)}
               >
+                <option value="">Not set</option>
                 {setAside.length > 0 && (
                   <optgroup label="Set aside">
                     {setAside.map((category) => (
@@ -549,7 +734,7 @@ export function AccountsManager({
                   {depositsIn(money.account.id).map((entry) => (
                     <li key={entry.id} className="flex items-center gap-3 py-2">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-base text-ink">{categoryName(entry.categoryId)}</p>
+                        <p className="truncate text-base text-ink">{depositLabel(entry)}</p>
                         <p className="truncate text-sm text-muted">
                           {formatDate(entry.date, settings.dateFormat)}
                           {entry.note && ` · ${entry.note}`}
@@ -593,8 +778,9 @@ export function AccountsManager({
             <>
               <strong className="font-medium text-ink">
                 {formatCurrency(deletingDeposit.amount, { currencySymbol: symbol })}
-              </strong>{' '}
-              set against {categoryName(deletingDeposit.categoryId)} will be removed, and the balance recalculated.
+              </strong>
+              {deletingDeposit.categoryId ? ` set against ${categoryName(deletingDeposit.categoryId)}` : ''} will be
+              removed, and the balance recalculated.
             </>
           ) : null
         }

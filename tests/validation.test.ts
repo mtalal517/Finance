@@ -266,8 +266,15 @@ describe('deposit validation', () => {
     assert.ok(result.fieldErrors.accountId);
   });
 
-  it('requires a category, because the point is saying what the money is for', () => {
+  it('accepts one with no category, because saying what it is for is optional', () => {
     const result = validateDeposit(data, { ...valid, categoryId: '' });
+
+    assert.ok(result.ok);
+    assert.equal(result.value.categoryId, null);
+  });
+
+  it('still rejects a category that was named but does not exist', () => {
+    const result = validateDeposit(data, { ...valid, categoryId: 'gone' });
 
     assert.ok(!result.ok);
     assert.ok(result.fieldErrors.categoryId);

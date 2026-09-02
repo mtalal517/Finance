@@ -394,14 +394,15 @@ export function validateDebt(body: unknown): Validated<DebtInput> {
 export interface DepositInput {
   accountId: string;
   amount: number;
-  categoryId: string;
+  categoryId: string | null;
   date: string;
   note: string;
 }
 
 /**
- * Both references are required: a deposit exists to say *where* money sits and
- * *what it is for*, so one without an account or a category records nothing.
+ * The account is required — money has to sit somewhere for the entry to record
+ * anything. What the money is for is optional: often you only know that it
+ * arrived. A category that *is* named still has to exist.
  */
 export function validateDeposit(data: FinanceData, body: unknown): Validated<DepositInput> {
   const v = new Validator();
@@ -412,7 +413,7 @@ export function validateDeposit(data: FinanceData, body: unknown): Validated<Dep
   return v.result<DepositInput>({
     accountId: accountRef(v, data, body.accountId, 'accountId', { required: true }) ?? '',
     amount: amount(v, body.amount, 'amount', 'Amount'),
-    categoryId: categoryRef(v, data, body.categoryId) ?? '',
+    categoryId: categoryRef(v, data, body.categoryId, 'categoryId', { required: false }),
     date: date(v, body.date),
     note: optionalText(body.note, 200),
   });

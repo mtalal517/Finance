@@ -52,6 +52,14 @@ export const UNKNOWN_CATEGORY: Category = {
   icon: 'package',
 };
 
+/** Money added without saying what it is for — a choice, not a missing value. */
+export const NOT_SET_CATEGORY: Category = {
+  id: '__not_set__',
+  name: 'Not set',
+  type: 'expense',
+  icon: 'circle-help',
+};
+
 // ---------------------------------------------------------------------------
 // Slicing by month
 // ---------------------------------------------------------------------------
@@ -542,10 +550,13 @@ export function getAccountContents(data: FinanceData): AccountContents[] {
 
   for (const entry of data.deposits) {
     const perCategory = byAccount.get(entry.accountId) ?? new Map();
-    const slice = perCategory.get(entry.categoryId) ?? { amount: 0, count: 0 };
+    // Money added without a category is still money in the account, so it gets
+    // its own slice rather than disappearing from the breakdown.
+    const key = entry.categoryId ?? NOT_SET_CATEGORY.id;
+    const slice = perCategory.get(key) ?? { amount: 0, count: 0 };
     slice.amount += entry.amount;
     slice.count += 1;
-    perCategory.set(entry.categoryId, slice);
+    perCategory.set(key, slice);
     byAccount.set(entry.accountId, perCategory);
   }
 
@@ -553,14 +564,124 @@ export function getAccountContents(data: FinanceData): AccountContents[] {
     const perCategory = byAccount.get(account.id) ?? new Map();
     const slices: AccountContentSlice[] = [...perCategory.entries()]
       .map(([categoryId, slice]) => ({
-        category: categories.get(categoryId) ?? UNKNOWN_CATEGORY,
+        category:
+          categoryId === NOT_SET_CATEGORY.id
+            ? NOT_SET_CATEGORY
+            : categories.get(categoryId) ?? UNKNOWN_CATEGORY,
         amount: round2(slice.amount),
         count: slice.count,
       }))
-      .sort((a, b) => b.amount - a.amount);
+      // Largest first, except "Not set", which is an absence and sits last.
+      .sort((a, b) => {
+        const aNotSet = a.category.id === NOT_SET_CATEGORY.id;
+        const bNotSet = b.category.id === NOT_SET_CATEGORY.id;
+        if (aNotSet !== bNotSet) return aNotSet ? 1 : -1;
+        return b.amount - a.amount;
+      });
 
     return { account, slices, total: sum(slices.map((s) => s.amount)) };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Account activity
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything that has touched one account, in one list.
+ *
+ * The four kinds of movement live in three different places — income, expenses
+ * and deposits — and each is written down differently. Flattening them here is
+ * what lets an account show its own history instead of only a balance, and
+ * keeps the account card from having to know how any of them are stored.
+ */
+export type AccountEntryKind = 'income' | 'spending' | 'repayment' | 'added';
+
+export interface AccountEntry {
+  id: string;
+  kind: AccountEntryKind;
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  /** What the row is, in the user's own words where they wrote any. */
+  title: string;
+  /** The supporting detail, empty when it would only repeat the title. */
+  subtitle: string;
+  amount: number;
+  /** Whether the money arrived or left; amounts stay positive. */
+  direction: 'in' | 'out';
+  createdAt: string;
+}
+
+export interface AccountActivity {
+  account: Account;
+  /** Newest first. */
+  entries: AccountEntry[];
+}
+
+const INCOME_LABELS: Record<IncomeType, string> = {
+  salary: 'Salary',
+  bonus: 'Bonus',
+  freelance: 'Freelance',
+  other: 'Other',
+};
+
+export function getAccountActivity(data: FinanceData): AccountActivity[] {
+  const categories = categoryIndex(data);
+  const categoryName = (id: string | null) =>
+    (id && categories.get(id)?.name) || UNKNOWN_CATEGORY.name;
+
+  const byAccount = new Map<string, AccountEntry[]>(data.accounts.map((a) => [a.id, []]));
+  const push = (accountId: string | null, entry: AccountEntry) => {
+    if (!accountId) return;
+    byAccount.get(accountId)?.push(entry);
+  };
+
+  for (const entry of data.income) {
+    const label = INCOME_LABELS[entry.type];
+    push(entry.accountId, {
+      id: entry.id,
+      kind: 'income',
+      date: entry.date,
+      title: entry.description || label,
+      subtitle: entry.description ? label : '',
+      amount: round2(entry.amount),
+      direction: 'in',
+      createdAt: entry.createdAt,
+    });
+  }
+
+  for (const t of data.expenses) {
+    const received = t.direction === 'in';
+    const name = received ? 'Repayment received' : categoryName(t.categoryId);
+    push(t.accountId, {
+      id: t.id,
+      kind: received ? 'repayment' : 'spending',
+      date: t.date,
+      title: t.description || name,
+      subtitle: t.description ? name : '',
+      amount: round2(t.amount),
+      direction: received ? 'in' : 'out',
+      createdAt: t.createdAt,
+    });
+  }
+
+  for (const entry of data.deposits) {
+    push(entry.accountId, {
+      id: entry.id,
+      kind: 'added',
+      date: entry.date,
+      title: entry.categoryId ? categoryName(entry.categoryId) : 'Money added',
+      subtitle: entry.note,
+      amount: round2(entry.amount),
+      direction: 'in',
+      createdAt: entry.createdAt,
+    });
+  }
+
+  return data.accounts.map((account) => ({
+    account,
+    entries: sortByDateDesc(byAccount.get(account.id) ?? []),
+  }));
 }
 
 /** Every deposit into one account, newest first. */

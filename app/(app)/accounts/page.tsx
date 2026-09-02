@@ -1,6 +1,7 @@
 import { ArrowDownLeft, ArrowUpRight, Coins } from 'lucide-react';
 import { readData } from '@/lib/data/store';
 import {
+  getAccountActivity,
   getAccountBalances,
   getAccountContents,
   getTotalBalance,
@@ -17,6 +18,7 @@ export default async function AccountsPage() {
   const symbol = data.settings.currencySymbol;
 
   const balances = getAccountBalances(data);
+  const activity = getAccountActivity(data);
   const contents = getAccountContents(data);
   const total = getTotalBalance(data);
   const unassigned = getUnassignedTotals(data);
@@ -54,6 +56,7 @@ export default async function AccountsPage() {
       </StatStrip>
 
       <AccountsManager
+        activity={activity}
         balances={balances}
         contents={contents}
         deposits={data.deposits}

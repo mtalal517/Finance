@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { Menu, Plus, X } from 'lucide-react';
 import { useExpenseModal } from '@/components/expenses/ExpenseModalProvider';
 import { SignOutButton } from '@/components/auth/SignOutButton';
+import { Mark } from '@/components/ui/Mark';
 import { PRIMARY_NAV, SECONDARY_NAV, titleForPath, type NavItem } from './navigation';
 
 /**
@@ -104,9 +105,9 @@ function Wordmark() {
     <div className="flex items-center gap-2.5">
       <span
         aria-hidden
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-white"
+        className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-white"
       >
-        F
+        <Mark className="h-[15px] w-auto" />
       </span>
       <span className="text-base font-semibold tracking-tight text-ink">My Finance</span>
     </div>

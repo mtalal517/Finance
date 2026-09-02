@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { Mark } from '@/components/ui/Mark';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,9 +11,9 @@ export default function LoginPage() {
         <div className="mb-6 flex flex-col items-center text-center">
           <span
             aria-hidden
-            className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-base font-semibold text-white"
+            className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white"
           >
-            F
+            <Mark className="h-[19px] w-auto" />
           </span>
           <h1 className="text-lg font-semibold text-ink">My Finance</h1>
           <p className="mt-1 text-base text-muted">Enter your password to continue.</p>

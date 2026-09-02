@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  getAccountActivity,
   getAccountBalances,
   getAccountContents,
   getBudgetVsActual,
@@ -337,6 +338,89 @@ describe('what is stored in an account', () => {
 
     assert.equal(stored.total, 0);
     assert.deepEqual(stored.slices, []);
+  });
+
+  it('gathers money added without a category under Not set', () => {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 0 }];
+    data.deposits.push(
+      deposit({ amount: 5_000, accountId: 'bank', categoryId: null }),
+      deposit({ amount: 2_000, accountId: 'bank', categoryId: null }),
+      deposit({ amount: 20_000, accountId: 'bank', categoryId: 'savings' }),
+    );
+
+    const [stored] = getAccountContents(data);
+
+    assert.equal(stored.total, 27_000, 'every added amount is still accounted for');
+    assert.deepEqual(
+      stored.slices.map((s) => [s.category.name, s.amount]),
+      [
+        ['Savings', 20_000],
+        ['Not set', 7_000],
+      ],
+    );
+  });
+});
+
+describe('what an account has seen', () => {
+  function bankOnly() {
+    const data = baseData();
+    data.accounts = [{ id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 1_000 }];
+    return data;
+  }
+
+  it('lists income, spending, repayments and money added together, newest first', () => {
+    const data = bankOnly();
+    data.income.push(income(110_000, '2026-09-01', { accountId: 'bank' }));
+    data.expenses.push(
+      txn({ amount: 900, date: '2026-09-02', accountId: 'bank', description: 'Fuel' }),
+      txn({ amount: 4_000, date: '2026-09-04', accountId: 'bank', direction: 'in', categoryId: null }),
+    );
+    data.deposits.push(deposit({ amount: 20_000, accountId: 'bank', date: '2026-09-03' }));
+
+    const [activity] = getAccountActivity(data);
+
+    assert.equal(activity.account.id, 'bank');
+    assert.deepEqual(
+      activity.entries.map((e) => [e.kind, e.date, e.direction, e.amount]),
+      [
+        ['repayment', '2026-09-04', 'in', 4_000],
+        ['added', '2026-09-03', 'in', 20_000],
+        ['spending', '2026-09-02', 'out', 900],
+        ['income', '2026-09-01', 'in', 110_000],
+      ],
+    );
+  });
+
+  it('names each entry, falling back when nothing was written down', () => {
+    const data = bankOnly();
+    data.income.push(income(110_000, '2026-09-01', { accountId: 'bank' }));
+    data.expenses.push(txn({ amount: 900, date: '2026-09-01', accountId: 'bank', description: '' }));
+    data.deposits.push(
+      deposit({ amount: 20_000, accountId: 'bank', date: '2026-09-01', note: 'From salary' }),
+      deposit({ amount: 500, accountId: 'bank', date: '2026-09-01', categoryId: null, note: '' }),
+    );
+
+    const [activity] = getAccountActivity(data);
+    const titles = activity.entries.map((e) => e.title);
+
+    assert.ok(titles.includes('Salary'), 'income falls back to its type');
+    assert.ok(titles.includes('Transport'), 'spending falls back to its category');
+    assert.ok(titles.includes('Savings'), 'money added leads with what it is for');
+    assert.ok(titles.includes('Money added'), 'and says that much when it is not set');
+  });
+
+  it('leaves out anything belonging to another account or to none', () => {
+    const data = bankOnly();
+    data.accounts.push({ id: 'cash', name: 'Cash', icon: 'wallet', openingBalance: 0 });
+    data.income.push(income(110_000, '2026-09-01', { accountId: null }));
+    data.expenses.push(txn({ amount: 900, date: '2026-09-02', accountId: 'cash' }));
+    data.deposits.push(deposit({ amount: 20_000, accountId: 'bank', date: '2026-09-03' }));
+
+    const [bank, cash] = getAccountActivity(data);
+
+    assert.deepEqual(bank.entries.map((e) => e.kind), ['added']);
+    assert.deepEqual(cash.entries.map((e) => e.kind), ['spending']);
   });
 });
 

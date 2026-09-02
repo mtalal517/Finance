@@ -301,8 +301,9 @@ function normalizeSubscriptions(
 }
 
 /**
- * A deposit needs both an account to sit in and a category to be for; without
- * either it says nothing, so it is dropped rather than half-repaired.
+ * A deposit needs an account to sit in; without one it says nothing, so it is
+ * dropped rather than half-repaired. A category is optional, and one pointing
+ * at a deleted category is forgotten rather than taking the money with it.
  */
 function normalizeDeposits(
   value: unknown,
@@ -319,13 +320,13 @@ function normalizeDeposits(
         id: uniqueId(seen, raw.id, 'dep'),
         accountId: accountIds.has(accountId) ? accountId : '',
         amount: money(raw.amount),
-        categoryId: categoryIds.has(categoryId) ? categoryId : '',
+        categoryId: categoryIds.has(categoryId) ? categoryId : null,
         date: isoDate(raw.date, today()),
         note: str(raw.note).slice(0, 200),
         createdAt: str(raw.createdAt, new Date().toISOString()),
       };
     })
-    .filter((d) => d.amount > 0 && d.accountId !== '' && d.categoryId !== '');
+    .filter((d) => d.amount > 0 && d.accountId !== '');
 }
 
 export function normalizeData(input: unknown): FinanceData {

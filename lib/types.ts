@@ -113,19 +113,19 @@ export interface Debt {
 }
 
 /**
- * Money placed into an account, tagged with what it is for.
+ * Money placed into an account, optionally tagged with what it is for.
  *
  * Neither income nor spending: it does not enter the month's arithmetic at all.
- * It says where money sits and which category or savings pot it belongs to,
- * which is the one thing a transaction cannot express — a transaction has an
- * account it came *out* of and never one it went *into*.
+ * It says where money sits and, when you care to say, which category or savings
+ * pot it belongs to — the one thing a transaction cannot express, since a
+ * transaction has an account it came *out* of and never one it went *into*.
  */
 export interface Deposit {
   id: string;
   accountId: string;
   amount: number;
-  /** The category or savings pot this money is set against. */
-  categoryId: string;
+  /** The category or savings pot this money is set against. Optional. */
+  categoryId: string | null;
   /** ISO date, `YYYY-MM-DD`. */
   date: string;
   note: string;
