@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pencil, Plus, Target, Trash2, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Minus, Pencil, Plus, Target, Trash2, X } from 'lucide-react';
+import { useExpenseModal } from '@/components/expenses/ExpenseModalProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -19,7 +20,8 @@ import type { DateFormat, Goal } from '@/lib/types';
  * Goals, their progress and their contribution history.
  *
  * Progress is the sum of real deposits rather than a number you overwrite, so
- * "add money" leaves a trail you can look back at.
+ * "add money" leaves a trail you can look back at. Spending from a goal writes
+ * an ordinary expense carrying the goal's id; it shows here in the same trail.
  */
 
 interface GoalValues {
@@ -43,6 +45,7 @@ export function GoalsManager({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const { addExpense } = useExpenseModal();
 
   const [editing, setEditing] = useState<{ id?: string; values: GoalValues } | null>(null);
   const [contributing, setContributing] = useState<GoalProgress | null>(null);
@@ -222,6 +225,13 @@ export function GoalsManager({
                     label="Still needed"
                     value={formatCurrency(progress.remaining, { currencySymbol: symbol })}
                   />
+                  {progress.spent > 0 && (
+                    <DetailRow
+                      label="Spent from goal"
+                      tone="muted"
+                      value={formatCurrency(progress.spent, { currencySymbol: symbol })}
+                    />
+                  )}
                   <DetailRow
                     label="Target date"
                     tone="muted"
@@ -239,9 +249,18 @@ export function GoalsManager({
                   <Button size="sm" variant="primary" icon={Plus} onClick={() => openContribute(progress)}>
                     Add money
                   </Button>
-                  {goal.contributions.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={Minus}
+                    disabled={progress.currentAmount <= 0}
+                    onClick={() => addExpense({ goalId: goal.id })}
+                  >
+                    Spend
+                  </Button>
+                  {progress.activity.length > 0 && (
                     <Button size="sm" variant="ghost" onClick={() => setExpanded(isOpen ? null : goal.id)}>
-                      {isOpen ? 'Hide history' : `${goal.contributions.length} contribution${goal.contributions.length === 1 ? '' : 's'}`}
+                      {isOpen ? 'Hide history' : `${progress.activity.length} ${progress.activity.length === 1 ? 'entry' : 'entries'}`}
                     </Button>
                   )}
                   <div className="ml-auto flex gap-0.5">
@@ -266,23 +285,39 @@ export function GoalsManager({
 
                 {isOpen && (
                   <ul className="mt-3 divide-y divide-line border-t border-line pt-1">
-                    {[...goal.contributions].reverse().map((item) => (
-                      <li key={item.id} className="flex items-center gap-3 py-2 text-sm">
-                        <span className="tnum w-20 shrink-0 text-muted">{formatDate(item.date, dateFormat)}</span>
-                        <span className="min-w-0 flex-1 truncate text-ink-soft">{item.note || 'Contribution'}</span>
-                        <span className="tnum shrink-0 font-medium text-ink">
-                          {formatCurrency(item.amount, { currencySymbol: symbol })}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeContribution(goal.id, item.id)}
-                          className="shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-sunken hover:text-danger"
-                          aria-label="Remove contribution"
-                        >
-                          <X size={13} strokeWidth={2} aria-hidden />
-                        </button>
-                      </li>
-                    ))}
+                    {progress.activity.map((item) =>
+                      item.kind === 'contribution' ? (
+                        <li key={item.id} className="flex items-center gap-3 py-2 text-sm">
+                          <span className="tnum w-20 shrink-0 text-muted">{formatDate(item.date, dateFormat)}</span>
+                          <ArrowDownLeft size={14} strokeWidth={2} className="shrink-0 text-positive" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate text-ink-soft">{item.note || 'Added'}</span>
+                          <span className="tnum shrink-0 font-medium text-positive">
+                            +{formatCurrency(item.amount, { currencySymbol: symbol })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeContribution(goal.id, item.id)}
+                            className="shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-sunken hover:text-danger"
+                            aria-label="Remove contribution"
+                          >
+                            <X size={13} strokeWidth={2} aria-hidden />
+                          </button>
+                        </li>
+                      ) : (
+                        <li key={item.id} className="flex items-center gap-3 py-2 text-sm">
+                          <span className="tnum w-20 shrink-0 text-muted">{formatDate(item.date, dateFormat)}</span>
+                          <ArrowUpRight size={14} strokeWidth={2} className="shrink-0 text-danger" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate text-ink-soft">
+                            {item.transaction.description || 'Spent'}
+                          </span>
+                          <span className="tnum shrink-0 font-medium text-danger">
+                            −{formatCurrency(item.amount, { currencySymbol: symbol })}
+                          </span>
+                          {/* An expense is edited where it lives; unlinking it is one field there. */}
+                          <span className="w-[21px] shrink-0" aria-hidden />
+                        </li>
+                      ),
+                    )}
                   </ul>
                 )}
               </div>
@@ -430,8 +465,8 @@ export function GoalsManager({
             <>
               <strong className="font-medium text-ink">{deleting.name}</strong> and its{' '}
               {deleting.contributions.length} recorded contribution
-              {deleting.contributions.length === 1 ? '' : 's'} will be removed. This does not touch your accounts or
-              transactions.
+              {deleting.contributions.length === 1 ? '' : 's'} will be removed. Expenses drawn from it stay in your
+              records, just no longer linked to a goal.
             </>
           ) : null
         }

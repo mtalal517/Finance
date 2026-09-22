@@ -22,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         categories: data.categories,
         accounts: data.accounts,
         debts: data.debts,
+        goals: data.goals,
       }}
     >
       <ExpenseModalProvider>

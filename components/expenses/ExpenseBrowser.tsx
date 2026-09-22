@@ -264,6 +264,9 @@ export function ExpenseBrowser({
                       </td>
                       <td className="max-w-[18rem] px-3 py-2.5">
                         <p className="truncate text-ink">{transaction.description || '—'}</p>
+                        {transaction.goal && (
+                          <p className="truncate text-sm text-muted">From {transaction.goal.name} goal</p>
+                        )}
                         {transaction.notes && (
                           <p className="truncate text-sm text-muted" title={transaction.notes}>
                             {transaction.notes}
@@ -325,6 +328,7 @@ export function ExpenseBrowser({
                       <p className="tnum truncate text-sm text-muted">
                         {formatDate(transaction.date, settings.dateFormat)}
                         {transaction.account && ` · ${transaction.account.name}`}
+                        {transaction.goal && ` · from ${transaction.goal.name}`}
                       </p>
                       <div className="mt-1.5 flex gap-0.5">
                         <Button

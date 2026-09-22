@@ -96,6 +96,26 @@ Click any category on the Budget or Dashboard page to see exactly what that budg
 spent on: every transaction with its date, description and account, plus the count and
 average.
 
+### Goals
+
+A goal is a target and a trail of what you put towards it. Progress is:
+
+```
+already saved + contributions − expenses drawn from the goal
+```
+
+**Add money** records a contribution. **Spend** opens the ordinary expense form with the
+goal preselected — or pick the goal under *Draw from goal* on any expense. Either way the
+row is an ordinary transaction: it counts against its category budget, comes off the
+account it was paid from and shows in analytics, *and* the goal comes down by the same
+amount. A 5,000 pharmacy bill drawn from a Medical goal is still a September expense; it
+just also tells the goal it has 5,000 less.
+
+The goal's history lists contributions and drawn expenses together, newest first. Draw
+more than was put in and the goal stops at zero, like a savings pot.
+
+Deleting a goal keeps its expenses, unlinked — that money really did leave.
+
 ### Debts
 
 Recording a debt notes who and how much; it moves no money. Payments move money.

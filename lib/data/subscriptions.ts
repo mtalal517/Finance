@@ -108,6 +108,7 @@ export async function paySubscription(
       direction: 'out',
       debtId: null,
       subscriptionId: subscription.id,
+      goalId: null,
       createdAt: new Date().toISOString(),
     };
     data.expenses.push(transaction);

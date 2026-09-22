@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import type { Account, Category, Debt, Settings } from '@/lib/types';
+import type { Account, Category, Debt, Goal, Settings } from '@/lib/types';
 
 /**
  * Reference data that almost every form needs — the category list, the account
@@ -15,6 +15,7 @@ export interface AppData {
   categories: Category[];
   accounts: Account[];
   debts: Debt[];
+  goals: Goal[];
 }
 
 const AppDataContext = createContext<AppData | null>(null);

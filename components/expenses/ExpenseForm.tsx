@@ -22,6 +22,7 @@ export interface ExpenseFormValues {
   description: string;
   accountId: string;
   notes: string;
+  goalId: string;
 }
 
 export function toFormValues(transaction: Transaction): ExpenseFormValues {
@@ -32,6 +33,7 @@ export function toFormValues(transaction: Transaction): ExpenseFormValues {
     description: transaction.description,
     accountId: transaction.accountId ?? '',
     notes: transaction.notes,
+    goalId: transaction.goalId ?? '',
   };
 }
 
@@ -43,6 +45,7 @@ export function emptyFormValues(defaults: Partial<ExpenseFormValues> = {}): Expe
     description: '',
     accountId: '',
     notes: '',
+    goalId: '',
     ...defaults,
   };
 }
@@ -62,7 +65,7 @@ export function ExpenseForm({
   onSaved,
   onSubmittingChange,
 }: ExpenseFormProps) {
-  const { categories, accounts } = useAppData();
+  const { categories, accounts, goals } = useAppData();
   const router = useRouter();
   const toast = useToast();
 
@@ -102,6 +105,7 @@ export function ExpenseForm({
       description: values.description,
       accountId: values.accountId || null,
       notes: values.notes,
+      goalId: values.goalId || null,
       direction: 'out' as const,
     };
 
@@ -213,6 +217,24 @@ export function ExpenseForm({
           </option>
         ))}
       </SelectField>
+
+      {/* Only offered once there is a goal to draw from; a dropdown of nothing is noise. */}
+      {goals.length > 0 && (
+        <SelectField
+          label="Draw from goal"
+          value={values.goalId}
+          error={fieldErrors.goalId}
+          hint="Still counts as spending — the goal just comes down by this amount."
+          onChange={(e) => set('goalId', e.target.value)}
+        >
+          <option value="">Not from a goal</option>
+          {goals.map((goal) => (
+            <option key={goal.id} value={goal.id}>
+              {goal.name}
+            </option>
+          ))}
+        </SelectField>
+      )}
 
       <TextAreaField
         label="Notes"
