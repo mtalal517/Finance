@@ -50,6 +50,7 @@ export interface AccountUsage {
   transactions: number;
   income: number;
   deposits: number;
+  transfers: number;
 }
 
 /**
@@ -58,7 +59,8 @@ export interface AccountUsage {
  * (they still count towards spending, just not towards a balance).
  *
  * Money added to the account is the exception — it cannot be unassigned, since
- * a deposit with no account records nothing at all. Those rows go with it.
+ * a deposit with no account records nothing at all. Those rows go with it, and
+ * so do transfers touching the account, for the same reason.
  */
 export async function deleteAccount(id: string, strategy: 'unassign' | 'strict' = 'strict'): Promise<void> {
   await updateData((data) => {
@@ -69,8 +71,9 @@ export async function deleteAccount(id: string, strategy: 'unassign' | 'strict' 
       transactions: data.expenses.filter((t) => t.accountId === id).length,
       income: data.income.filter((i) => i.accountId === id).length,
       deposits: data.deposits.filter((d) => d.accountId === id).length,
+      transfers: data.transfers.filter((t) => t.fromAccountId === id || t.toAccountId === id).length,
     };
-    const total = usage.transactions + usage.income + usage.deposits;
+    const total = usage.transactions + usage.income + usage.deposits + usage.transfers;
 
     if (total > 0 && strategy === 'strict') {
       throw conflict(
@@ -82,6 +85,7 @@ export async function deleteAccount(id: string, strategy: 'unassign' | 'strict' 
       for (const t of data.expenses) if (t.accountId === id) t.accountId = null;
       for (const i of data.income) if (i.accountId === id) i.accountId = null;
       data.deposits = data.deposits.filter((d) => d.accountId !== id);
+      data.transfers = data.transfers.filter((t) => t.fromAccountId !== id && t.toAccountId !== id);
     }
 
     data.accounts.splice(index, 1);
