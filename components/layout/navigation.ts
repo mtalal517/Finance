@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  ArrowRightLeft,
   ChartColumn,
   CreditCard,
   HandCoins,
@@ -28,6 +29,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { href: '/analytics', label: 'Analytics', icon: ChartColumn },
   { href: '/goals', label: 'Goals', icon: Target },
   { href: '/accounts', label: 'Accounts', icon: CreditCard },
+  { href: '/transfers', label: 'Transfers', icon: ArrowRightLeft },
   { href: '/debts', label: 'Debts', icon: HandCoins },
 ];
 

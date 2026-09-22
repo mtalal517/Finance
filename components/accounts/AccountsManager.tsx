@@ -23,7 +23,7 @@ import type {
   AccountEntry,
   AccountEntryKind,
 } from '@/lib/finance/calculations';
-import type { Account, Deposit } from '@/lib/types';
+import type { Account, Deposit, Transfer } from '@/lib/types';
 
 /**
  * Accounts and their balances.
@@ -68,6 +68,7 @@ export function AccountsManager({
   balances,
   contents,
   deposits,
+  transfers,
   symbol,
   unassigned,
 }: {
@@ -75,6 +76,7 @@ export function AccountsManager({
   balances: AccountBalance[];
   contents: AccountContents[];
   deposits: Deposit[];
+  transfers: Transfer[];
   symbol: string;
   unassigned: { income: number; spending: number };
 }) {
@@ -250,6 +252,8 @@ export function AccountsManager({
   }
 
   const depositsIn = (accountId: string) => deposits.filter((d) => d.accountId === accountId);
+  const transfersTouching = (accountId: string) =>
+    transfers.filter((t) => t.fromAccountId === accountId || t.toAccountId === accountId);
   const entriesFor = (accountId: string) =>
     activity.find((a) => a.account.id === accountId)?.entries ?? [];
 
@@ -264,9 +268,12 @@ export function AccountsManager({
   async function confirmDelete() {
     if (!deleting) return;
     // Transactions are kept and simply unlinked; money added to the account
-    // goes with it, since a deposit with no account records nothing. Either one
-    // means the delete has to be confirmed rather than done silently.
-    const history = deleting.transactionCount + depositsIn(deleting.account.id).length;
+    // and transfers touching it go with it, since either with no account
+    // records nothing. Any of them means the delete has to be confirmed.
+    const history =
+      deleting.transactionCount +
+      depositsIn(deleting.account.id).length +
+      transfersTouching(deleting.account.id).length;
     const strategy = history > 0 ? '?strategy=unassign' : '';
     const response = await apiRequest(`/api/accounts/${deleting.account.id}${strategy}`, { method: 'DELETE' });
     if (!response.ok) {
@@ -366,11 +373,25 @@ export function AccountsManager({
                       value={`+ ${formatCurrency(balance.addedIn, { currencySymbol: symbol })}`}
                     />
                   )}
+                  {balance.transferredIn > 0 && (
+                    <DetailRow
+                      label="Transferred in"
+                      tone="positive"
+                      value={`+ ${formatCurrency(balance.transferredIn, { currencySymbol: symbol })}`}
+                    />
+                  )}
                   <DetailRow
                     label="Paid out"
                     tone="muted"
                     value={`− ${formatCurrency(balance.paidOut, { currencySymbol: symbol })}`}
                   />
+                  {balance.transferredOut > 0 && (
+                    <DetailRow
+                      label="Transferred out"
+                      tone="muted"
+                      value={`− ${formatCurrency(balance.transferredOut, { currencySymbol: symbol })}`}
+                    />
+                  )}
                 </dl>
 
                 {stored && stored.slices.length > 0 && (
@@ -476,7 +497,9 @@ export function AccountsManager({
         title="Delete this account?"
         body={
           deleting ? (
-            deleting.transactionCount > 0 || depositsIn(deleting.account.id).length > 0 ? (
+            deleting.transactionCount > 0 ||
+            depositsIn(deleting.account.id).length > 0 ||
+            transfersTouching(deleting.account.id).length > 0 ? (
               <>
                 <strong className="font-medium text-ink">{deleting.account.name}</strong>
                 {deleting.transactionCount > 0 && (
@@ -495,6 +518,14 @@ export function AccountsManager({
                       { currencySymbol: symbol },
                     )}{' '}
                     of money you added, which is removed with it
+                  </>
+                )}
+                {transfersTouching(deleting.account.id).length > 0 && (
+                  <>
+                    {deleting.transactionCount > 0 || depositsIn(deleting.account.id).length > 0 ? ', and' : ''} has{' '}
+                    {transfersTouching(deleting.account.id).length} transfer
+                    {transfersTouching(deleting.account.id).length === 1 ? '' : 's'} touching it, which are removed
+                    with it on both sides
                   </>
                 )}
                 .
@@ -566,11 +597,25 @@ export function AccountsManager({
                   value={`+ ${formatCurrency(viewing.addedIn, { currencySymbol: symbol })}`}
                 />
               )}
+              {viewing.transferredIn > 0 && (
+                <DetailRow
+                  label="Transferred in"
+                  tone="positive"
+                  value={`+ ${formatCurrency(viewing.transferredIn, { currencySymbol: symbol })}`}
+                />
+              )}
               <DetailRow
                 label="Paid out"
                 tone="muted"
                 value={`− ${formatCurrency(viewing.paidOut, { currencySymbol: symbol })}`}
               />
+              {viewing.transferredOut > 0 && (
+                <DetailRow
+                  label="Transferred out"
+                  tone="muted"
+                  value={`− ${formatCurrency(viewing.transferredOut, { currencySymbol: symbol })}`}
+                />
+              )}
             </dl>
 
             <div className="border-t border-line pt-4">

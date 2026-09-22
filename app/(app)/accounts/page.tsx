@@ -23,8 +23,11 @@ export default async function AccountsPage() {
   const total = getTotalBalance(data);
   const unassigned = getUnassignedTotals(data);
 
-  const received = balances.reduce((sum, b) => sum + b.incomeIn + b.receivedIn + b.addedIn, 0);
-  const paidOut = balances.reduce((sum, b) => sum + b.paidOut, 0);
+  const received = balances.reduce(
+    (sum, b) => sum + b.incomeIn + b.receivedIn + b.addedIn + b.transferredIn,
+    0,
+  );
+  const paidOut = balances.reduce((sum, b) => sum + b.paidOut + b.transferredOut, 0);
 
   return (
     <>
@@ -44,14 +47,14 @@ export default async function AccountsPage() {
           amount={received}
           symbol={symbol}
           icon={ArrowDownLeft}
-          hint="Income, repayments and money added"
+          hint="Income, repayments, money added and transfers in"
         />
         <StatItem
           label="Money out"
           amount={paidOut}
           symbol={symbol}
           icon={ArrowUpRight}
-          hint="Paid from an account"
+          hint="Paid or transferred out of an account"
         />
       </StatStrip>
 
@@ -60,6 +63,7 @@ export default async function AccountsPage() {
         balances={balances}
         contents={contents}
         deposits={data.deposits}
+        transfers={data.transfers}
         symbol={symbol}
         unassigned={unassigned}
       />
