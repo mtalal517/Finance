@@ -60,6 +60,7 @@ const KIND_LABELS: Record<AccountEntryKind, string> = {
   spending: 'Spending',
   repayment: 'Repayment',
   added: 'Money added',
+  transfer: 'Transfer',
 };
 
 export function AccountsManager({

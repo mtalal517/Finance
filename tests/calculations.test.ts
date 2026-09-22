@@ -6,15 +6,18 @@ import {
   getAccountContents,
   getBudgetVsActual,
   getCategoryDetail,
+  enrichTransfers,
   getDebtOverview,
   getGoalProgress,
   getGoalsProgress,
   getMonthSummary,
   getSpendingComparison,
   getSubscriptionOverview,
+  getTotalBalance,
+  getTransferOverview,
   getYearSummary,
 } from '../lib/finance/calculations';
-import { baseData, deposit, income, subscription, txn } from './helpers';
+import { baseData, deposit, income, subscription, transfer, txn } from './helpers';
 
 const SEP = '2026-09';
 
@@ -760,5 +763,86 @@ describe('subscriptions', () => {
       getSubscriptionOverview(data, TODAY).rows.map((r) => r.subscription.name),
       ['Overdue', 'Soon', 'Later', 'Paused'],
     );
+  });
+});
+
+describe('transfers', () => {
+  it('moves a balance from one account to the other', () => {
+    const data = baseData();
+    data.accounts[0].openingBalance = 10_000;
+    data.transfers.push(transfer({ amount: 4_000 }));
+
+    const [bank, cash] = getAccountBalances(data);
+
+    assert.equal(bank.transferredOut, 4_000);
+    assert.equal(bank.currentBalance, 6_000);
+    assert.equal(cash.transferredIn, 4_000);
+    assert.equal(cash.currentBalance, 4_000);
+  });
+
+  it('moves the pot with the money', () => {
+    const data = baseData();
+    data.deposits.push(deposit({ amount: 20_000, categoryId: 'savings' }));
+    data.transfers.push(transfer({ amount: 5_000, categoryId: 'savings' }));
+
+    const [bank, cash] = getAccountContents(data);
+
+    assert.deepEqual(bank.slices.map((s) => [s.category.id, s.amount]), [['savings', 15_000]]);
+    assert.deepEqual(cash.slices.map((s) => [s.category.id, s.amount]), [['savings', 5_000]]);
+  });
+
+  it('moves the "not set" slice when no category is given', () => {
+    const data = baseData();
+    data.transfers.push(transfer({ amount: 1_000, categoryId: null }));
+
+    const [bank, cash] = getAccountContents(data);
+
+    assert.equal(bank.slices[0].amount, -1_000);
+    assert.equal(cash.slices[0].amount, 1_000);
+    assert.equal(bank.slices[0].category.id, cash.slices[0].category.id);
+  });
+
+  it('leaves the month and the total balance untouched', () => {
+    const data = baseData();
+    data.transfers.push(transfer({ amount: 9_000, date: '2026-09-05' }));
+
+    const summary = getMonthSummary(data, '2026-09');
+
+    assert.equal(summary.income, 0);
+    assert.equal(summary.expenses, 0);
+    assert.equal(getTotalBalance(data), 0);
+  });
+
+  it('shows both legs in account activity', () => {
+    const data = baseData();
+    data.transfers.push(transfer({ amount: 2_500, note: 'ATM' }));
+
+    const [bank, cash] = getAccountActivity(data);
+
+    assert.deepEqual(
+      bank.entries.map((e) => [e.kind, e.direction, e.title]),
+      [['transfer', 'out', 'Transfer to Cash']],
+    );
+    assert.deepEqual(
+      cash.entries.map((e) => [e.kind, e.direction, e.title]),
+      [['transfer', 'in', 'Transfer from Bank']],
+    );
+    assert.equal(bank.entries[0].subtitle, 'ATM');
+  });
+
+  it('summarises what moved this month and overall, newest first', () => {
+    const data = baseData();
+    data.transfers.push(
+      transfer({ amount: 1_000, date: '2026-08-15' }),
+      transfer({ amount: 2_000, date: '2026-09-10' }),
+    );
+
+    const overview = getTransferOverview(data, '2026-09');
+
+    assert.equal(overview.movedThisMonth, 2_000);
+    assert.equal(overview.movedAllTime, 3_000);
+    assert.equal(overview.count, 2);
+    assert.deepEqual(enrichTransfers(data).map((t) => t.amount), [2_000, 1_000]);
+    assert.equal(enrichTransfers(data)[0].from?.name, 'Bank');
   });
 });

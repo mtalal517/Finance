@@ -10,6 +10,7 @@ import type {
   IncomeType,
   Subscription,
   Transaction,
+  Transfer,
 } from '@/lib/types';
 import { addMonths, daysUntil, monthOf, monthRange, todayIso, yearOf } from './dates';
 import { safePercent } from './format';
@@ -469,6 +470,10 @@ export interface AccountBalance {
   receivedIn: number;
   /** Money put straight into this account and tagged with what it is for. */
   addedIn: number;
+  /** Moved in from another of your accounts. */
+  transferredIn: number;
+  /** Moved out to another of your accounts. */
+  transferredOut: number;
   currentBalance: number;
   transactionCount: number;
 }
@@ -484,6 +489,8 @@ export function getAccountBalances(data: FinanceData): AccountBalance[] {
         paidOut: 0,
         receivedIn: 0,
         addedIn: 0,
+        transferredIn: 0,
+        transferredOut: 0,
         currentBalance: round2(account.openingBalance),
         transactionCount: 0,
       },
@@ -515,14 +522,24 @@ export function getAccountBalances(data: FinanceData): AccountBalance[] {
     balance.addedIn += entry.amount;
   }
 
+  // A transfer touches two balances and, like a deposit, is not spending history.
+  for (const entry of data.transfers) {
+    const from = balances.get(entry.fromAccountId);
+    const to = balances.get(entry.toAccountId);
+    if (from) from.transferredOut += entry.amount;
+    if (to) to.transferredIn += entry.amount;
+  }
+
   return [...balances.values()].map((b) => ({
     ...b,
     incomeIn: round2(b.incomeIn),
     paidOut: round2(b.paidOut),
     receivedIn: round2(b.receivedIn),
     addedIn: round2(b.addedIn),
+    transferredIn: round2(b.transferredIn),
+    transferredOut: round2(b.transferredOut),
     currentBalance: round2(
-      b.openingBalance + b.incomeIn + b.receivedIn + b.addedIn - b.paidOut,
+      b.openingBalance + b.incomeIn + b.receivedIn + b.addedIn + b.transferredIn - b.paidOut - b.transferredOut,
     ),
   }));
 }
@@ -530,10 +547,12 @@ export function getAccountBalances(data: FinanceData): AccountBalance[] {
 /**
  * What each account is holding, by category.
  *
- * Only money you added explicitly appears here — income and spending say
- * nothing about what money is *for*, so folding them in would be inventing an
- * answer. An account can therefore hold a balance with nothing accounted for,
- * which is the honest reading of "I have not said what this is."
+ * Only money you added explicitly, or moved between accounts, appears here —
+ * income and spending say nothing about what money is *for*, so folding them
+ * in would be inventing an answer. An account can therefore hold a balance
+ * with nothing accounted for, which is the honest reading of "I have not said
+ * what this is." A transfer moves a pot: its slice comes off one account and
+ * lands on the other, and may go negative if the pot was never recorded there.
  */
 export interface AccountContentSlice {
   category: Category;
@@ -552,16 +571,22 @@ export function getAccountContents(data: FinanceData): AccountContents[] {
   const categories = categoryIndex(data);
   const byAccount = new Map<string, Map<string, { amount: number; count: number }>>();
 
-  for (const entry of data.deposits) {
-    const perCategory = byAccount.get(entry.accountId) ?? new Map();
-    // Money added without a category is still money in the account, so it gets
-    // its own slice rather than disappearing from the breakdown.
-    const key = entry.categoryId ?? NOT_SET_CATEGORY.id;
+  const add = (accountId: string, categoryId: string | null, delta: number) => {
+    const perCategory = byAccount.get(accountId) ?? new Map();
+    // Money with no category is still money in the account, so it gets its
+    // own slice rather than disappearing from the breakdown.
+    const key = categoryId ?? NOT_SET_CATEGORY.id;
     const slice = perCategory.get(key) ?? { amount: 0, count: 0 };
-    slice.amount += entry.amount;
+    slice.amount += delta;
     slice.count += 1;
     perCategory.set(key, slice);
-    byAccount.set(entry.accountId, perCategory);
+    byAccount.set(accountId, perCategory);
+  };
+
+  for (const entry of data.deposits) add(entry.accountId, entry.categoryId, entry.amount);
+  for (const entry of data.transfers) {
+    add(entry.fromAccountId, entry.categoryId, -entry.amount);
+    add(entry.toAccountId, entry.categoryId, entry.amount);
   }
 
   return data.accounts.map((account) => {
@@ -594,12 +619,12 @@ export function getAccountContents(data: FinanceData): AccountContents[] {
 /**
  * Everything that has touched one account, in one list.
  *
- * The four kinds of movement live in three different places — income, expenses
- * and deposits — and each is written down differently. Flattening them here is
+ * The five kinds of movement live in four different places — income, expenses,
+ * deposits and transfers — and each is written down differently. Flattening them here is
  * what lets an account show its own history instead of only a balance, and
  * keeps the account card from having to know how any of them are stored.
  */
-export type AccountEntryKind = 'income' | 'spending' | 'repayment' | 'added';
+export type AccountEntryKind = 'income' | 'spending' | 'repayment' | 'added' | 'transfer';
 
 export interface AccountEntry {
   id: string;
@@ -631,6 +656,8 @@ const INCOME_LABELS: Record<IncomeType, string> = {
 
 export function getAccountActivity(data: FinanceData): AccountActivity[] {
   const categories = categoryIndex(data);
+  const accounts = accountIndex(data);
+  const accountName = (id: string) => accounts.get(id)?.name ?? 'another account';
   const categoryName = (id: string | null) =>
     (id && categories.get(id)?.name) || UNKNOWN_CATEGORY.name;
 
@@ -682,6 +709,31 @@ export function getAccountActivity(data: FinanceData): AccountActivity[] {
     });
   }
 
+  // One transfer is two rows: it left one account and arrived in another.
+  for (const entry of data.transfers) {
+    const detail = entry.note || (entry.categoryId ? categoryName(entry.categoryId) : '');
+    push(entry.fromAccountId, {
+      id: entry.id,
+      kind: 'transfer',
+      date: entry.date,
+      title: `Transfer to ${accountName(entry.toAccountId)}`,
+      subtitle: detail,
+      amount: round2(entry.amount),
+      direction: 'out',
+      createdAt: entry.createdAt,
+    });
+    push(entry.toAccountId, {
+      id: entry.id,
+      kind: 'transfer',
+      date: entry.date,
+      title: `Transfer from ${accountName(entry.fromAccountId)}`,
+      subtitle: detail,
+      amount: round2(entry.amount),
+      direction: 'in',
+      createdAt: entry.createdAt,
+    });
+  }
+
   return data.accounts.map((account) => ({
     account,
     entries: sortByDateDesc(byAccount.get(account.id) ?? []),
@@ -706,6 +758,42 @@ export function getUnassignedTotals(data: FinanceData): { income: number; spendi
     spending: sum(
       data.expenses.filter((t) => !t.accountId && t.direction === 'out').map((t) => t.amount),
     ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Transfers
+// ---------------------------------------------------------------------------
+
+export interface EnrichedTransfer extends Transfer {
+  from: Account | null;
+  to: Account | null;
+  category: Category | null;
+}
+
+/** Every transfer, newest first, with its accounts and category resolved. */
+export function enrichTransfers(data: FinanceData): EnrichedTransfer[] {
+  const accounts = accountIndex(data);
+  const categories = categoryIndex(data);
+  return sortByDateDesc(data.transfers).map((t) => ({
+    ...t,
+    from: accounts.get(t.fromAccountId) ?? null,
+    to: accounts.get(t.toAccountId) ?? null,
+    category: (t.categoryId && categories.get(t.categoryId)) || null,
+  }));
+}
+
+export interface TransferOverview {
+  movedThisMonth: number;
+  movedAllTime: number;
+  count: number;
+}
+
+export function getTransferOverview(data: FinanceData, month: string): TransferOverview {
+  return {
+    movedThisMonth: round2(sum(data.transfers.filter((t) => monthOf(t.date) === month).map((t) => t.amount))),
+    movedAllTime: round2(sum(data.transfers.map((t) => t.amount))),
+    count: data.transfers.length,
   };
 }
 
