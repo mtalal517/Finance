@@ -174,6 +174,21 @@ from-and-to transfer.
 Deleting an account keeps its transactions, unlinked — but takes its added money with
 it, since a deposit with no account records nothing.
 
+### Transfers
+
+A transfer moves money from one of your accounts to another. It is neither income
+nor spending — the month's arithmetic cannot see it — so the total across accounts
+does not change; only where the money sits does.
+
+Give it a category and the pot moves too: 5,000 of *Emergency* transferred from
+JS Bank to Cash takes 5,000 off JS Bank's Emergency slice and adds it to Cash's.
+Move a pot out of an account that never had it recorded and that slice goes
+negative rather than pretending otherwise.
+
+Each account's history shows both legs — *Transfer to Cash* on one side,
+*Transfer from JS Bank* on the other. Deleting an account removes its transfers on
+both sides, as with money added: a transfer with a missing end records nothing.
+
 ## Project layout
 
 ```
@@ -181,7 +196,7 @@ middleware.ts           The password gate — runs before every page and handler
 app/
 ├── (app)/              Everything behind the password: Dashboard, Income,
 │                       Expenses, Subscriptions, Budget, Analytics, Goals,
-│                       Accounts, Debts, Settings — plus the sidebar shell
+│                       Accounts, Transfers, Debts, Settings — plus the sidebar shell
 ├── login/              The sign-in screen, outside the shell
 └── api/                Route handlers — the only things that write to disk
 
