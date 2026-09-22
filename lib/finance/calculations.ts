@@ -421,15 +421,19 @@ export function getCategoryBreakdown(
 export interface EnrichedTransaction extends Transaction {
   category: Category | null;
   account: Account | null;
+  /** The goal this money was drawn from, when it was. */
+  goal: Goal | null;
 }
 
 export function enrichTransactions(data: FinanceData, transactions: Transaction[]): EnrichedTransaction[] {
   const categories = categoryIndex(data);
   const accounts = accountIndex(data);
+  const goals = new Map(data.goals.map((g) => [g.id, g]));
   return transactions.map((t) => ({
     ...t,
     category: (t.categoryId && categories.get(t.categoryId)) || null,
     account: (t.accountId && accounts.get(t.accountId)) || null,
+    goal: (t.goalId && goals.get(t.goalId)) || null,
   }));
 }
 
@@ -709,8 +713,17 @@ export function getUnassignedTotals(data: FinanceData): { income: number; spendi
 // Goals
 // ---------------------------------------------------------------------------
 
+/** One line of a goal's history: money put in, or money drawn out by a linked expense. */
+export type GoalActivity =
+  | { kind: 'contribution'; id: string; date: string; amount: number; note: string }
+  | { kind: 'expense'; id: string; date: string; amount: number; transaction: Transaction };
+
 export interface GoalProgress {
   goal: Goal;
+  /** Total drawn back out through expenses linked to this goal. */
+  spent: number;
+  /** Contributions and linked expenses together, newest first. */
+  activity: GoalActivity[];
   currentAmount: number;
   targetAmount: number;
   remaining: number;
@@ -722,9 +735,25 @@ export interface GoalProgress {
   requiredPerMonth: number | null;
 }
 
-export function getGoalProgress(goal: Goal): GoalProgress {
+/**
+ * Progress is starting amount + contributions − expenses linked to the goal.
+ * A linked expense is still ordinary spending; the goal just comes down by it.
+ * Draw more than was put in and the goal stops at zero, like a savings pot.
+ */
+export function getGoalProgress(goal: Goal, expenses: Transaction[] = []): GoalProgress {
+  const linked = expenses.filter((t) => t.goalId === goal.id && t.direction === 'out');
   const contributed = sum(goal.contributions.map((c) => c.amount));
-  const currentAmount = round2(goal.initialAmount + contributed);
+  const spent = sum(linked.map((t) => t.amount));
+  const currentAmount = round2(Math.max(0, goal.initialAmount + contributed - spent));
+
+  const activity: GoalActivity[] = [
+    ...goal.contributions.map(
+      (c): GoalActivity => ({ kind: 'contribution', id: c.id, date: c.date, amount: c.amount, note: c.note }),
+    ),
+    ...linked.map(
+      (t): GoalActivity => ({ kind: 'expense', id: t.id, date: t.date, amount: t.amount, transaction: t }),
+    ),
+  ].sort((a, b) => b.date.localeCompare(a.date));
   const remaining = round2(Math.max(0, goal.targetAmount - currentAmount));
   const isComplete = currentAmount >= goal.targetAmount;
 
@@ -733,6 +762,8 @@ export function getGoalProgress(goal: Goal): GoalProgress {
 
   return {
     goal,
+    spent,
+    activity,
     currentAmount,
     targetAmount: goal.targetAmount,
     remaining,
@@ -746,7 +777,7 @@ export function getGoalProgress(goal: Goal): GoalProgress {
 }
 
 export function getGoalsProgress(data: FinanceData): GoalProgress[] {
-  return data.goals.map(getGoalProgress);
+  return data.goals.map((goal) => getGoalProgress(goal, data.expenses));
 }
 
 // ---------------------------------------------------------------------------

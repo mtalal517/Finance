@@ -65,6 +65,7 @@ function newExpense(id: string, amount: number) {
     direction: 'out' as const,
     debtId: null,
     subscriptionId: null,
+    goalId: null,
     createdAt: new Date().toISOString(),
   };
 }
@@ -127,6 +128,63 @@ describe('reading', () => {
     assert.deepEqual(
       data.expenses.map((t) => t.id),
       ['good'],
+    );
+  });
+
+  it('unlinks an expense from a goal that no longer exists but keeps the row', async () => {
+    await client
+      .db('finance-test')
+      .collection('finance')
+      .insertOne({
+        _id: 'primary' as never,
+        rev: 1,
+        updatedAt: new Date(),
+        data: {
+          categories: [{ id: 'food', name: 'Food', type: 'expense', icon: 'utensils' }],
+          goals: [{ id: 'g1', name: 'Medical', targetAmount: 1000, initialAmount: 0, contributions: [] }],
+          expenses: [
+            { id: 'linked', amount: 100, categoryId: 'food', date: '2026-09-01', goalId: 'g1' },
+            { id: 'orphan', amount: 100, categoryId: 'food', date: '2026-09-01', goalId: 'gone' },
+          ],
+        },
+      });
+
+    const data = await store.readData();
+    assert.deepEqual(
+      data.expenses.map((t) => [t.id, t.goalId]),
+      [
+        ['linked', 'g1'],
+        ['orphan', null],
+      ],
+    );
+  });
+
+  it('drops a transfer whose account is gone and forgets an unknown category', async () => {
+    await client
+      .db('finance-test')
+      .collection('finance')
+      .insertOne({
+        _id: 'primary' as never,
+        rev: 1,
+        updatedAt: new Date(),
+        data: {
+          categories: [{ id: 'food', name: 'Food', type: 'expense', icon: 'utensils' }],
+          accounts: [
+            { id: 'bank', name: 'Bank', icon: 'landmark', openingBalance: 0 },
+            { id: 'cash', name: 'Cash', icon: 'banknote', openingBalance: 0 },
+          ],
+          transfers: [
+            { id: 'ok', fromAccountId: 'bank', toAccountId: 'cash', amount: 100, date: '2026-09-01', categoryId: 'ghost' },
+            { id: 'orphan', fromAccountId: 'bank', toAccountId: 'gone', amount: 100, date: '2026-09-01' },
+            { id: 'self', fromAccountId: 'bank', toAccountId: 'bank', amount: 100, date: '2026-09-01' },
+          ],
+        },
+      });
+
+    const data = await store.readData();
+    assert.deepEqual(
+      data.transfers.map((t) => [t.id, t.categoryId]),
+      [['ok', null]],
     );
   });
 });

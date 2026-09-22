@@ -8,6 +8,7 @@ import {
   getCategoryDetail,
   getDebtOverview,
   getGoalProgress,
+  getGoalsProgress,
   getMonthSummary,
   getSpendingComparison,
   getSubscriptionOverview,
@@ -460,6 +461,103 @@ describe('goals', () => {
     assert.equal(progress.percentComplete, 100);
     assert.equal(progress.remaining, 0);
     assert.equal(progress.isComplete, true);
+  });
+
+  it('draws expenses linked to the goal back out of its progress', () => {
+    const goal = {
+      id: 'g3',
+      name: 'Medical',
+      targetAmount: 50_000,
+      initialAmount: 0,
+      targetDate: null,
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contributions: [{ id: 'c1', date: '2026-09-01', amount: 5_000, note: '' }],
+    };
+    const expenses = [
+      txn({ amount: 2_000, date: '2026-09-10', categoryId: 'health', goalId: 'g3' }),
+      // Belongs to another goal — must not touch this one.
+      txn({ amount: 999, date: '2026-09-11', categoryId: 'health', goalId: 'other' }),
+      // Not linked at all.
+      txn({ amount: 500, date: '2026-09-12', categoryId: 'health' }),
+    ];
+
+    const progress = getGoalProgress(goal, expenses);
+
+    assert.equal(progress.spent, 2_000);
+    assert.equal(progress.currentAmount, 3_000);
+    assert.equal(progress.remaining, 47_000);
+    assert.equal(progress.percentComplete, 6);
+  });
+
+  it('never lets a goal fall below zero when more is drawn than was put in', () => {
+    const goal = {
+      id: 'g4',
+      name: 'Medical',
+      targetAmount: 50_000,
+      initialAmount: 1_000,
+      targetDate: null,
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contributions: [],
+    };
+    const progress = getGoalProgress(goal, [
+      txn({ amount: 4_000, date: '2026-09-10', categoryId: 'health', goalId: 'g4' }),
+    ]);
+
+    assert.equal(progress.spent, 4_000);
+    assert.equal(progress.currentAmount, 0);
+    assert.equal(progress.percentComplete, 0);
+    assert.equal(progress.remaining, 50_000);
+  });
+
+  it('merges contributions and linked expenses into one newest-first timeline', () => {
+    const goal = {
+      id: 'g5',
+      name: 'Medical',
+      targetAmount: 50_000,
+      initialAmount: 0,
+      targetDate: null,
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contributions: [
+        { id: 'c1', date: '2026-09-01', amount: 5_000, note: 'Salary' },
+        { id: 'c2', date: '2026-09-20', amount: 1_000, note: '' },
+      ],
+    };
+    const bill = txn({ amount: 2_000, date: '2026-09-10', categoryId: 'health', goalId: 'g5', description: 'Pharmacy' });
+
+    const progress = getGoalProgress(goal, [bill]);
+
+    assert.deepEqual(
+      progress.activity.map((a) => [a.kind, a.date, a.amount]),
+      [
+        ['contribution', '2026-09-20', 1_000],
+        ['expense', '2026-09-10', 2_000],
+        ['contribution', '2026-09-01', 5_000],
+      ],
+    );
+    const expense = progress.activity[1];
+    assert.equal(expense.kind, 'expense');
+    if (expense.kind === 'expense') assert.equal(expense.transaction.id, bill.id);
+  });
+
+  it('reports goals from the whole data set with their linked spending', () => {
+    const data = baseData();
+    data.goals.push({
+      id: 'g6',
+      name: 'Medical',
+      targetAmount: 50_000,
+      initialAmount: 5_000,
+      targetDate: null,
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contributions: [],
+    });
+    data.expenses.push(txn({ amount: 1_500, date: '2026-09-10', categoryId: 'health', goalId: 'g6' }));
+
+    const [progress] = getGoalsProgress(data);
+    assert.equal(progress.currentAmount, 3_500);
   });
 });
 

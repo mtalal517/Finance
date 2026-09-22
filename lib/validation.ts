@@ -187,6 +187,7 @@ export interface TransactionInput {
   notes: string;
   direction: TransactionDirection;
   debtId: string | null;
+  goalId: string | null;
 }
 
 export function validateTransaction(data: FinanceData, body: unknown): Validated<TransactionInput> {
@@ -202,6 +203,12 @@ export function validateTransaction(data: FinanceData, body: unknown): Validated
     if (!data.debts.some((d) => d.id === debtIdRaw)) v.fail('debtId', 'That debt no longer exists.');
     else debtId = debtIdRaw;
   }
+  const goalIdRaw = text(body.goalId);
+  let goalId: string | null = null;
+  if (goalIdRaw) {
+    if (!data.goals.some((g) => g.id === goalIdRaw)) v.fail('goalId', 'That goal no longer exists.');
+    else goalId = goalIdRaw;
+  }
 
   return v.result<TransactionInput>({
     amount: amount(v, body.amount, 'amount', 'Amount'),
@@ -213,6 +220,7 @@ export function validateTransaction(data: FinanceData, body: unknown): Validated
     notes: optionalText(body.notes, 2000),
     direction,
     debtId,
+    goalId,
   });
 }
 
@@ -412,6 +420,41 @@ export function validateDeposit(data: FinanceData, body: unknown): Validated<Dep
 
   return v.result<DepositInput>({
     accountId: accountRef(v, data, body.accountId, 'accountId', { required: true }) ?? '',
+    amount: amount(v, body.amount, 'amount', 'Amount'),
+    categoryId: categoryRef(v, data, body.categoryId, 'categoryId', { required: false }),
+    date: date(v, body.date),
+    note: optionalText(body.note, 200),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Transfers
+// ---------------------------------------------------------------------------
+
+export interface TransferInput {
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  categoryId: string | null;
+  date: string;
+  note: string;
+}
+
+export function validateTransfer(data: FinanceData, body: unknown): Validated<TransferInput> {
+  const v = new Validator();
+  if (!isObject(body)) {
+    return { ok: false, message: 'The request was not understood.', fieldErrors: {} };
+  }
+
+  const fromAccountId = accountRef(v, data, body.fromAccountId, 'fromAccountId', { required: true }) ?? '';
+  const toAccountId = accountRef(v, data, body.toAccountId, 'toAccountId', { required: true }) ?? '';
+  if (fromAccountId && toAccountId && fromAccountId === toAccountId) {
+    v.fail('toAccountId', 'Choose a different account to move the money into.');
+  }
+
+  return v.result<TransferInput>({
+    fromAccountId,
+    toAccountId,
     amount: amount(v, body.amount, 'amount', 'Amount'),
     categoryId: categoryRef(v, data, body.categoryId, 'categoryId', { required: false }),
     date: date(v, body.date),

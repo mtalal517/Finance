@@ -10,6 +10,7 @@ import type {
   Debt,
   DebtDirection,
   Deposit,
+  Transfer,
   FinanceData,
   Goal,
   GoalContribution,
@@ -164,6 +165,7 @@ function normalizeTransactions(
   accountIds: Set<string>,
   debtIds: Set<string>,
   subscriptionIds: Set<string>,
+  goalIds: Set<string>,
 ): Transaction[] {
   const seen = new Set<string>();
   return array(value)
@@ -174,6 +176,7 @@ function normalizeTransactions(
       const accountId = str(raw.accountId) || null;
       const debtId = str(raw.debtId) || null;
       const subscriptionId = str(raw.subscriptionId) || null;
+      const goalId = str(raw.goalId) || null;
       return {
         id: uniqueId(seen, raw.id, 'exp'),
         amount: money(raw.amount),
@@ -187,6 +190,7 @@ function normalizeTransactions(
         debtId: debtId && debtIds.has(debtId) ? debtId : null,
         subscriptionId:
           subscriptionId && subscriptionIds.has(subscriptionId) ? subscriptionId : null,
+        goalId: goalId && goalIds.has(goalId) ? goalId : null,
         createdAt: str(raw.createdAt, new Date().toISOString()),
       };
     })
@@ -329,6 +333,37 @@ function normalizeDeposits(
     .filter((d) => d.amount > 0 && d.accountId !== '');
 }
 
+function normalizeTransfers(
+  value: unknown,
+  categoryIds: Set<string>,
+  accountIds: Set<string>,
+): Transfer[] {
+  const seen = new Set<string>();
+  return array(value)
+    .filter(isObject)
+    .map((raw): Transfer => {
+      const categoryId = str(raw.categoryId);
+      return {
+        id: uniqueId(seen, raw.id, 'tr'),
+        fromAccountId: str(raw.fromAccountId),
+        toAccountId: str(raw.toAccountId),
+        amount: money(raw.amount),
+        categoryId: categoryIds.has(categoryId) ? categoryId : null,
+        date: isoDate(raw.date, today()),
+        note: str(raw.note).slice(0, 200),
+        createdAt: str(raw.createdAt, new Date().toISOString()),
+      };
+    })
+    // A transfer with a missing side, or both sides the same, moves nothing.
+    .filter(
+      (t) =>
+        t.amount > 0 &&
+        accountIds.has(t.fromAccountId) &&
+        accountIds.has(t.toAccountId) &&
+        t.fromAccountId !== t.toAccountId,
+    );
+}
+
 export function normalizeData(input: unknown): FinanceData {
   if (!isObject(input)) return createEmptyData();
 
@@ -343,6 +378,9 @@ export function normalizeData(input: unknown): FinanceData {
   const subscriptions = normalizeSubscriptions(input.subscriptions, categoryIds, accountIds);
   const subscriptionIds = new Set(subscriptions.map((s) => s.id));
 
+  const goals = normalizeGoals(input.goals);
+  const goalIds = new Set(goals.map((g) => g.id));
+
   return {
     version: DATA_VERSION,
     settings: normalizeSettings(input.settings),
@@ -356,11 +394,13 @@ export function normalizeData(input: unknown): FinanceData {
       accountIds,
       debtIds,
       subscriptionIds,
+      goalIds,
     ),
     budgets: normalizeBudgets(input.budgets, categoryIds),
-    goals: normalizeGoals(input.goals),
+    goals,
     debts,
     subscriptions,
     deposits: normalizeDeposits(input.deposits, categoryIds, accountIds),
+    transfers: normalizeTransfers(input.transfers, categoryIds, accountIds),
   };
 }

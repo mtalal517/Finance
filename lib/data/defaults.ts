@@ -48,5 +48,6 @@ export function createEmptyData(): FinanceData {
     debts: [],
     subscriptions: [],
     deposits: [],
+    transfers: [],
   };
 }

@@ -9,6 +9,7 @@ import {
   validateIncome,
   validateSubscription,
   validateTransaction,
+  validateTransfer,
 } from '../lib/validation';
 import { baseData } from './helpers';
 
@@ -60,6 +61,32 @@ describe('transaction validation', () => {
     const errors = (bad as { fieldErrors: Record<string, string> }).fieldErrors;
     assert.ok(errors.categoryId);
     assert.ok(errors.accountId);
+  });
+
+  it('links an expense to a goal that exists and refuses one that does not', () => {
+    const withGoal = baseData();
+    withGoal.goals.push({
+      id: 'g1',
+      name: 'Medical',
+      targetAmount: 50_000,
+      initialAmount: 0,
+      targetDate: null,
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contributions: [],
+    });
+
+    const ok = validateTransaction(withGoal, { amount: 100, categoryId: 'food', date: '2026-09-22', goalId: 'g1' });
+    assert.ok(ok.ok);
+    assert.equal(ok.value.goalId, 'g1');
+
+    const blank = validateTransaction(withGoal, { amount: 100, categoryId: 'food', date: '2026-09-22', goalId: '' });
+    assert.ok(blank.ok);
+    assert.equal(blank.value.goalId, null);
+
+    const bad = validateTransaction(withGoal, { amount: 100, categoryId: 'food', date: '2026-09-22', goalId: 'ghost' });
+    assert.equal(bad.ok, false);
+    assert.ok((bad as { fieldErrors: Record<string, string> }).fieldErrors.goalId);
   });
 
   it('allows an incoming repayment with no category', () => {
@@ -292,5 +319,51 @@ describe('deposit validation', () => {
 
     assert.ok(!result.ok);
     assert.ok(result.fieldErrors.date);
+  });
+});
+
+describe('transfer validation', () => {
+  const data = baseData();
+  const MOVE = {
+    fromAccountId: 'bank',
+    toAccountId: 'cash',
+    amount: 5_000,
+    categoryId: 'savings',
+    date: '2026-09-22',
+    note: 'Top up',
+  };
+
+  it('accepts a well-formed transfer', () => {
+    const result = validateTransfer(data, MOVE);
+    assert.ok(result.ok);
+    assert.deepEqual(result.value, MOVE);
+  });
+
+  it('refuses to move money into the account it came from', () => {
+    const result = validateTransfer(data, { ...MOVE, toAccountId: 'bank' });
+    assert.equal(result.ok, false);
+    assert.match((result as { fieldErrors: Record<string, string> }).fieldErrors.toAccountId, /different/i);
+  });
+
+  it('requires both accounts to exist', () => {
+    const result = validateTransfer(data, { ...MOVE, fromAccountId: 'ghost', toAccountId: 'nowhere' });
+    assert.equal(result.ok, false);
+    const errors = (result as { fieldErrors: Record<string, string> }).fieldErrors;
+    assert.ok(errors.fromAccountId);
+    assert.ok(errors.toAccountId);
+  });
+
+  it('treats the category as optional but real when given', () => {
+    const blank = validateTransfer(data, { ...MOVE, categoryId: '' });
+    assert.ok(blank.ok);
+    assert.equal(blank.value.categoryId, null);
+
+    const bad = validateTransfer(data, { ...MOVE, categoryId: 'ghost' });
+    assert.equal(bad.ok, false);
+  });
+
+  it('rejects an amount of zero or less', () => {
+    const result = validateTransfer(data, { ...MOVE, amount: 0 });
+    assert.equal(result.ok, false);
   });
 });

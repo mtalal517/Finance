@@ -66,6 +66,11 @@ export interface Transaction {
   debtId: string | null;
   /** Set when this row was written by paying a subscription. */
   subscriptionId: string | null;
+  /**
+   * Set when this money was drawn out of a goal. The expense still counts as
+   * ordinary spending — the goal's progress simply comes down by the same amount.
+   */
+  goalId: string | null;
   createdAt: string;
 }
 
@@ -132,6 +137,27 @@ export interface Deposit {
   createdAt: string;
 }
 
+/**
+ * Money moved from one of your accounts to another.
+ *
+ * Neither income nor spending: the month's arithmetic cannot see it. It moves a
+ * balance and, when a category is given, moves that pot from one account to
+ * the other — so each account's "what is in it" follows the money.
+ */
+export interface Transfer {
+  id: string;
+  fromAccountId: string;
+  /** Never the same as `fromAccountId`. */
+  toAccountId: string;
+  amount: number;
+  /** The pot this money belongs to. Optional. */
+  categoryId: string | null;
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  note: string;
+  createdAt: string;
+}
+
 /** How often a subscription is charged. */
 export type BillingCycle = 'monthly' | 'quarterly' | 'yearly';
 
@@ -181,4 +207,5 @@ export interface FinanceData {
   debts: Debt[];
   subscriptions: Subscription[];
   deposits: Deposit[];
+  transfers: Transfer[];
 }
